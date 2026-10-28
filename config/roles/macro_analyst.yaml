@@ -4,7 +4,7 @@ daily_token_budget: 80000
 reporting_line: HeadOfResearch
 schedule_hours: 4
 triggers: []
-actions: [block_entries, flag]
+actions: [block_entries, flag, propose_playbook]
 tool_allowlist:
   - read_events
   - cap_market_get

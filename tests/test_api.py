@@ -64,12 +64,14 @@ def test_halt_writes_flag(api):
     assert (api_module.HALT_FILE).exists()
 
 
-def test_archive_endpoints_without_orchestrator(api):
+def test_archive_endpoints_without_orchestrator(api, tmp_path, monkeypatch):
+    """Split mode: the API process reads the archive from disk itself (no orchestrator in this process)."""
+    monkeypatch.setenv("FIRM_ARCHIVE_DIR", str(tmp_path / "archiv"))
     client, _, _ = api
     headers = {"Authorization": f"Bearer {TOKEN}"}
 
     body = client.get("/api/archive", headers=headers).json()
-    assert body["available"] is False
+    assert body["available"] is True
     assert body["trades"] == []
 
     trades = client.get("/api/archive/trades", headers=headers).json()

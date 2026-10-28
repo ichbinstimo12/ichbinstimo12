@@ -41,34 +41,51 @@ class StrategyGate:
     def overview(self) -> dict:
         d = self._load()
         return {"created": d.get("created"), "trials": d.get("trials"), "resolution": d.get("resolution"),
-                "verdicts": {e: {k: v.get(k) for k in ("verdict", "strategy", "oos_expectancy_r", "oos_trades")}
+                "verdicts": {e: {k: v.get(k) for k in ("verdict", "strategy", "resolution", "oos_expectancy_r",
+                                                        "oos_trades", "size_feasible", "size_reason")}
                              | ({"explore": v["explore"]["strategy"]} if v.get("explore") else {})
                              for e, v in (d.get("verdicts") or {}).items()}}
 
     def decision(self, epic: str, is_demo: bool, mode: str = "PAPER", resolution: str | None = None):
         """-> (erlaubt, strategie, params, risk_factor, grund)"""
+        d = self.decide(epic, is_demo, mode, resolution)
+        return d["ok"], d["strategy"], d["params"], d["risk_factor"], d["reason"]
+
+    def decide(self, epic: str, is_demo: bool, mode: str = "PAPER", resolution: str | None = None) -> dict:
+        """Wie decision(), plus Zeitrahmen der freigegebenen Strategie (`resolution`) und Spur (`lane`)."""
+        def no(reason):
+            return {"ok": False, "strategy": None, "params": None, "risk_factor": 0.0, "reason": reason,
+                    "resolution": None, "lane": None}
+
+        def yes(strategy, params, factor, reason, lane, res):
+            return {"ok": True, "strategy": strategy, "params": params, "risk_factor": factor, "reason": reason,
+                    "resolution": res or default_res, "lane": lane}
+
         live = str(mode).upper().startswith("LIVE")
         demo_only_ok = is_demo and not live
         d = self._load()
         v = (d.get("verdicts") or {}).get(epic)
         if not v:
-            return False, None, None, 0.0, f"kein Forschungsurteil fuer {epic} (Forschungslauf ausstehend)"
+            return no(f"kein Forschungsurteil fuer {epic} (Forschungslauf ausstehend)")
         if time.time() - float(d.get("created") or 0) > self.max_age:
-            return False, None, None, 0.0, "Forschungsurteil aelter als 30 Tage (neu pruefen)"
-        if resolution and d.get("resolution") and d["resolution"] != resolution:
-            return (False, None, None, 0.0,
-                    f"Urteil gilt fuer {d['resolution']}-Kerzen, Desk laeuft auf {resolution} (FIRM_TRADE_RESOLUTION pruefen)")
+            return no("Forschungsurteil aelter als 30 Tage (neu pruefen)")
+        file_res = d.get("resolution") if isinstance(d.get("resolution"), str) else None
+        default_res = file_res or resolution
+        if resolution and file_res and file_res != resolution and not v.get("resolution"):
+            return no(f"Urteil gilt fuer {file_res}-Kerzen, Desk laeuft auf {resolution} (FIRM_TRADE_RESOLUTION pruefen)")
         verdict = v.get("verdict")
         if v.get("size_feasible") is False and not v.get("explore"):
-            return False, None, None, 0.0, v.get("size_reason") or "mit diesem Konto nicht handelbar (Mindestgroesse)"
+            return no(v.get("size_reason") or "mit diesem Konto nicht handelbar (Mindestgroesse)")
         if v.get("size_feasible") is False:
             verdict = "SIZE_BLOCKED"
         if verdict == "PASS":
-            return True, v["strategy"], v.get("params"), 1.0, "PASS (out-of-sample bestanden)"
+            return yes(v["strategy"], v.get("params"), 1.0, "PASS (out-of-sample bestanden)", "PASS", v.get("resolution"))
         if verdict == "FORWARD_TEST" and demo_only_ok:
-            return True, v["strategy"], v.get("params"), 0.5, "FORWARD_TEST (nur Demo, halbes Risiko)"
+            return yes(v["strategy"], v.get("params"), 0.5, "FORWARD_TEST (nur Demo, halbes Risiko)", "FORWARD_TEST",
+                       v.get("resolution"))
         ex = v.get("explore")
         if ex and demo_only_ok and _explore_enabled():
-            return (True, ex["strategy"], ex.get("params"), EXPLORE_RISK,
-                    f"EXPLORE (nur Demo, 1/4 Risiko, OOS E={ex.get('oos_expectancy_r', 0):.2f} R nicht signifikant)")
-        return False, None, None, 0.0, f"Urteil {verdict}: " + "; ".join(v.get("reasons", [])[:2])
+            return yes(ex["strategy"], ex.get("params"), EXPLORE_RISK,
+                       f"EXPLORE (nur Demo, 1/4 Risiko, OOS E={ex.get('oos_expectancy_r', 0):.2f} R nicht signifikant)",
+                       "EXPLORE", ex.get("resolution"))
+        return no(f"Urteil {verdict}: " + "; ".join(v.get("reasons", [])[:2]))

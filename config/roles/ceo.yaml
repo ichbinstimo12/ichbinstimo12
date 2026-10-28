@@ -4,7 +4,7 @@ daily_token_budget: 60000
 reporting_line: null
 schedule_hours: 24
 triggers: [DESK_IDLE, STRATEGY_STOPPED, TRADING_HALTED, RESEARCH_FAILED, FLAG]
-actions: [flag, request_research, propose_hire]
+actions: [flag, request_research, propose_hire, propose_playbook]
 tool_allowlist:
   - read_events
   - read_tasks

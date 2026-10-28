@@ -4,7 +4,7 @@ daily_token_budget: 60000
 reporting_line: CEO
 schedule_hours: 24
 triggers: []
-actions: [flag]
+actions: [flag, propose_playbook]
 tool_allowlist:
   - read_events
   - read_tasks

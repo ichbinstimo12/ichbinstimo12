@@ -295,6 +295,8 @@ class TradingDesk:
         overlay: Any = None,
         health: Optional[StrategyHealth] = None,
         halt_file: Optional[str] = None,
+        stream: Any = None,
+        quote_max_age: float = 15.0,
         max_api_errors: int = 10,
         api_error_window_s: float = 1800.0,
     ):
@@ -323,6 +325,7 @@ class TradingDesk:
         self.last_summary: Dict[str, Any] = {}
         self._last_status_key: Optional[str] = None
         self.halt_file = Path(halt_file) if halt_file else None
+        self.stream, self.quote_max_age = stream, quote_max_age
         self.max_api_errors, self.api_error_window_s = max_api_errors, api_error_window_s
         self._api_errors: List[float] = []
         self._api_halt_reported = False
@@ -336,10 +339,11 @@ class TradingDesk:
         self._closed_market_logged: set = set()
 
     # ------------------------------------------------------------- v2 helpers
-    def _engine_for(self, strategy: str, params: Optional[dict]) -> SignalEngineV2:
-        key = f"{strategy}:{json.dumps(params or {}, sort_keys=True)}"
+    def _engine_for(self, strategy: str, params: Optional[dict], resolution: Optional[str] = None) -> SignalEngineV2:
+        res = resolution or self.resolution
+        key = f"{strategy}:{res}:{json.dumps(params or {}, sort_keys=True)}"
         if key not in self._engines:
-            self._engines[key] = SignalEngineV2(strategy, params or {}, resolution=self.resolution)
+            self._engines[key] = SignalEngineV2(strategy, params or {}, resolution=res)
         return self._engines[key]
 
     def _save_rules(self) -> None:
@@ -417,7 +421,7 @@ class TradingDesk:
             return None
         return "Kill-Kriterium aktiv: " + "; ".join(s.get("reasons") or [])
 
-    def _stale(self, candles: List[Dict[str, Any]]) -> Optional[str]:
+    def _stale(self, candles: List[Dict[str, Any]], resolution: Optional[str] = None) -> Optional[str]:
         """Stale-data check: the newest candle must be at most 3 bars old (prices frozen -> do not trade)."""
         if not candles:
             return "keine Kursdaten"
@@ -426,7 +430,7 @@ class TradingDesk:
         if last is None:
             return None  # format unknown (e.g. test doubles) -> the signal engine decides
         age = time.time() - last
-        bar = RES_SECONDS.get(self.resolution, 3600)
+        bar = RES_SECONDS.get(resolution or self.resolution, 3600)
         if age > 3 * bar + bar:
             return f"Kursdaten veraltet (letzte Kerze vor {age / 60:.0f} min)"
         return None
@@ -610,9 +614,18 @@ class TradingDesk:
             if str(market.get("status") or "").upper() != "TRADEABLE":
                 summary["skipped"].append({"epic": epic, "reason": f"market {market.get('status') or 'unknown'}"})
                 continue
+            # Live price from the WebSocket stream when it runs; a stale stream price blocks the entry.
+            if self.stream is not None and getattr(self.stream, "connected", False):
+                q = self.stream.quote(epic, self.quote_max_age)
+                if q is None:
+                    summary["skipped"].append({"epic": epic, "reason": f"Live-Kurs aelter als {self.quote_max_age:.0f} s"})
+                    continue
+                market = dict(market, bid=q["bid"], ask=q["ask"])
 
             is_demo = bool(getattr(self.broker, "is_demo", True))
-            ok, strat, params, risk_factor, why = self.gate.decision(epic, is_demo, self.mode, self.resolution)
+            dec = self.gate.decide(epic, is_demo, self.mode, self.resolution)
+            ok, strat, params, risk_factor, why = dec["ok"], dec["strategy"], dec["params"], dec["risk_factor"], dec["reason"]
+            res = dec.get("resolution") or self.resolution
             if not ok:
                 summary["skipped"].append({"epic": epic, "reason": f"keine Forschungsfreigabe: {why}"})
                 continue
@@ -620,6 +633,9 @@ class TradingDesk:
             if stopped:
                 summary["skipped"].append({"epic": epic, "reason": stopped})
                 continue
+            if self.mode.upper() == "LIVE_MICRO":
+                risk_factor *= 0.5          # erste Live-Stufe: halbes Risiko pro Trade (Skalierungs-Leiter)
+                why = f"{why}; LIVE_MICRO x0.5"
             if self.overlay is not None:
                 o_factor, o_why = self.overlay.factor(epic)
                 if o_factor <= 0:
@@ -628,14 +644,14 @@ class TradingDesk:
                 if o_factor < 1:
                     risk_factor *= o_factor
                     why = f"{why}; Risiko x{o_factor:.2f} ({o_why})"
-            engine = self.engine or self._engine_for(strat, params)
+            engine = self.engine or self._engine_for(strat, params, res)
             try:
-                candles = await self.broker.get_candles(epic, self.resolution, self.lookback)
+                candles = await self.broker.get_candles(epic, res, self.lookback)
             except Exception as e:
                 self._api_error()
                 summary["skipped"].append({"epic": epic, "reason": f"candles unavailable: {e}"})
                 continue
-            stale = self._stale(candles)
+            stale = self._stale(candles, res)
             if stale:
                 summary["skipped"].append({"epic": epic, "reason": stale})
                 continue
@@ -722,7 +738,8 @@ class TradingDesk:
                 self.rules.on_entry()
                 self.state.data.setdefault("pos_meta", {})[epic] = {
                     "side": signal.side, "strategy": strat, "params": params, "balance_at_entry": balance,
-                    "risk": _risk, "lane": why.split(" ")[0], "opened_ts": datetime.utcnow().timestamp()}
+                    "risk": _risk, "lane": dec.get("lane") or why.split(" ")[0], "resolution": res,
+                    "opened_ts": time.time()}
                 self._save_rules()
                 position_deal = await self._resolve_position_deal(epic, signal.side, known_deals)
                 if position_deal:
@@ -823,19 +840,19 @@ class TradingDesk:
             if not epic or not deal_id:
                 continue
 
-            try:
-                candles = await self.broker.get_candles(epic, self.resolution, self.lookback)
-                market = await self.broker.get_market_details(epic)
-            except Exception as e:
-                logger.warning(f"Exit check failed for {epic}: {e}")
-                continue
-
             meta = (self.state.data.get("pos_meta") or {}).get(epic) or {}
             strat = meta.get("strategy")
             if not strat:
                 continue
-            # Dieselben Parameter wie beim Einstieg (vorher: Standardparameter -> andere Exit-Kanaele als getestet).
-            engine = self.engine or self._engine_for(strat, meta.get("params"))
+            res = meta.get("resolution") or self.resolution
+            try:
+                candles = await self.broker.get_candles(epic, res, self.lookback)
+            except Exception as e:
+                self._api_error()
+                logger.warning(f"Exit check failed for {epic}: {e}")
+                continue
+            # Dieselben Parameter und Kerzen wie beim Einstieg (vorher: Standardparameter -> andere Exit-Kanaele).
+            engine = self.engine or self._engine_for(strat, meta.get("params"), res)
             if not engine.should_exit(epic, candles, direction, meta.get("opened_ts")):
                 continue
             class _Reason:  # kleine Huelle, damit der Rest der Funktion unveraendert bleibt

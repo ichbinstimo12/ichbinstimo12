@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import httpx
-from dotenv import load_dotenv
+from src.firm.envload import load_env
 
 # Load environment variables from .env file
-load_dotenv()
+load_env()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BrokerClient")
@@ -152,6 +152,11 @@ class CapitalComClient:
         # (Re-)login lazily: after a failed start or an expired session the next call recovers by itself.
         if self.session is None or time.time() >= self.session.expires_at:
             await self.authenticate()
+
+    async def stream_credentials(self) -> tuple:
+        """CST / X-SECURITY-TOKEN for the WebSocket stream (logs in if needed)."""
+        await self._ensure_session()
+        return self.session.cst, self.session.x_security_token
 
     def _get_headers(self) -> Dict[str, str]:
         if not self.session:

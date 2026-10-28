@@ -1,1936 +1,949 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trading Firm · Operations Floor</title>
-<link rel="icon" href="data:,">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading Firm · Office</title>
 <style>
   :root {
-    --bg: #06090d;
-    --panel: #0b1118;
-    --panel-2: #0f1721;
-    --line: #1b2634;
-    --text: #c6d4e3;
-    --muted: #6b7d92;
-    --dim: #3f4f63;
-    --cyan: #38bdf8;
-    --emerald: #34d399;
-    --amber: #fbbf24;
-    --violet: #a78bfa;
-    --rose: #fb7185;
-    --teal: #2dd4bf;
+    --bg: #070b10; --panel: #0c131b; --panel2: #101a24; --line: #1b2a39; --line2: #24384c;
+    --text: #dbe7f3; --muted: #93a7bb; --dim: #607588;
+    --cyan: #38bdf8; --emerald: #34d399; --amber: #fbbf24; --rose: #fb7185; --violet: #a78bfa; --teal: #2dd4bf;
+    --live: #ef4444; --paper: #22c55e;
   }
   * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    margin: 0;
-    background:
-      radial-gradient(1200px 520px at 18% -12%, #0d1a26 0%, transparent 62%),
-      radial-gradient(900px 480px at 100% -4%, #14101f 0%, transparent 58%),
-      var(--bg);
-    color: var(--text);
-    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
-    font-size: 13px;
-    -webkit-font-smoothing: antialiased;
-  }
-  .app { max-width: 1560px; margin: 0 auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  button { font: inherit; }
+  :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .wrap { max-width: 1680px; margin: 0 auto; padding: 12px; display: grid; gap: 12px; }
 
   /* ---------- header ---------- */
-  header.top {
-    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-    background: linear-gradient(180deg, #0e1621, #0a1017);
-    border: 1px solid var(--line); border-radius: 10px; padding: 11px 15px;
-  }
-  .brand { display: flex; align-items: baseline; gap: 10px; }
-  .brand .name { font-size: 15px; letter-spacing: .16em; font-weight: 700; color: #e8f1fa; }
-  .brand .ver { font-size: 10px; color: var(--dim); letter-spacing: .12em; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    border: 1px solid var(--line); border-radius: 999px;
-    padding: 3px 9px; font-size: 10px; letter-spacing: .1em; color: var(--muted);
-    background: #080d13;
-  }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: 0 0 auto; }
-  .dot.ok { background: var(--emerald); box-shadow: 0 0 8px rgba(52,211,153,.8); }
-  .dot.warn { background: var(--amber); box-shadow: 0 0 8px rgba(251,191,36,.7); }
-  .dot.bad { background: var(--rose); box-shadow: 0 0 8px rgba(251,113,133,.7); }
-  .spacer { flex: 1 1 auto; }
-  .metrics { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
-  .metric { display: flex; flex-direction: column; gap: 2px; min-width: 84px; }
-  .metric .k { font-size: 9px; letter-spacing: .14em; color: var(--dim); }
-  .metric .v { font-size: 14px; color: #eaf3fb; font-weight: 700; }
-  .metric .v small { font-size: 10px; color: var(--muted); font-weight: 400; }
-  .metric .v.up { color: var(--emerald); }
-  .metric .v.down { color: var(--rose); }
-  .kill {
-    border: 1px solid #7f1d1d; background: #2a0d12; color: #fecdd3;
-    padding: 8px 14px; border-radius: 7px; font: inherit; font-size: 11px;
-    letter-spacing: .12em; cursor: pointer; transition: .15s;
-  }
-  .kill:hover { background: #451018; border-color: var(--rose); }
+  header.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 14px;
+    background: linear-gradient(180deg, #0e1720, #0a1118); border: 1px solid var(--line); border-radius: 10px; }
+  .brand { font-weight: 800; letter-spacing: .22em; font-size: 15px; }
+  .brand small { display: block; font-weight: 400; letter-spacing: .14em; color: var(--dim); font-size: 9px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--line2);
+    border-radius: 999px; font-size: 10px; letter-spacing: .1em; color: var(--muted); white-space: nowrap; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .dot.ok { background: var(--emerald); box-shadow: 0 0 6px var(--emerald); }
+  .dot.warn { background: var(--amber); } .dot.bad { background: var(--rose); box-shadow: 0 0 6px var(--rose); }
+  .mode { font-weight: 800; letter-spacing: .14em; padding: 4px 11px; border-radius: 6px; font-size: 11px; }
+  .mode.PAPER { background: #06281a; color: #86efac; border: 1px solid #166534; }
+  .mode.BACKTEST { background: #1e1b4b; color: #c7d2fe; border: 1px solid #3730a3; }
+  .mode.LIVE, .mode.LIVE_MICRO { background: #3b0a0a; color: #fecaca; border: 1px solid #b91c1c; animation: blink 2s infinite; }
+  @keyframes blink { 50% { box-shadow: 0 0 12px #ef4444; } }
+  .metrics { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-left: auto; }
+  .metric .k { display: block; font-size: 9px; letter-spacing: .14em; color: var(--dim); }
+  .metric .v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric .v.up { color: var(--emerald); } .metric .v.down { color: var(--rose); }
+  .metric .v.small { font-size: 11px; }
+  .kill { background: #2a0b10; color: #fecdd3; border: 1px solid #9f1239; border-radius: 8px; padding: 9px 14px;
+    font-weight: 800; letter-spacing: .12em; cursor: pointer; }
+  .kill:hover { background: #4c0519; }
 
-  /* ---------- layout ---------- */
-  .grid-main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; }
-  .grid-bottom { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; }
-  @media (max-width: 1080px) {
-    .grid-main, .grid-bottom { grid-template-columns: 1fr; }
-  }
+  /* ---------- alarm bar ---------- */
+  .alarms { display: none; gap: 8px; flex-wrap: wrap; padding: 8px 12px; border: 1px solid #5b2130;
+    background: #160a0e; border-radius: 10px; }
+  .alarms.show { display: flex; }
+  .alarm { font-size: 11px; color: #ffd9df; background: #26101a; border: 1px solid #4a1d2a; border-radius: 6px; padding: 4px 8px; }
+  .alarm b { color: #fda4af; letter-spacing: .06em; }
+  .alarm.warn { color: #fde68a; background: #231a07; border-color: #4d3a0b; } .alarm.warn b { color: var(--amber); }
 
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
-  .panel-head {
-    display: flex; align-items: center; gap: 8px; padding: 9px 12px;
-    border-bottom: 1px solid var(--line); background: #090f16;
-  }
-  .panel-head h2 { margin: 0; font-size: 10px; letter-spacing: .18em; color: #9fb3c8; font-weight: 700; }
-  .panel-head .hint { margin-left: auto; font-size: 10px; color: var(--dim); }
-  .panel-body { padding: 12px; overflow: auto; }
+  /* ---------- grid ---------- */
+  .main { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 12px; align-items: start; }
+  .row2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 12px; }
+  .row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 1250px) { .main, .row2 { grid-template-columns: 1fr; } .row3 { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 760px) { .row3 { grid-template-columns: 1fr; } .metrics { margin-left: 0; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0; }
+  .panel-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line);
+    background: #0a1118; }
+  .panel-head h2 { margin: 0; font-size: 10px; letter-spacing: .2em; color: #c9d8e6; }
+  .hint { margin-left: auto; font-size: 10px; color: var(--dim); }
+  .panel-body { padding: 10px 12px; overflow: auto; }
+  .empty { color: var(--dim); font-style: italic; padding: 6px 0; }
+  .mini { background: #0d1620; border: 1px solid var(--line2); color: var(--muted); font-size: 10px; letter-spacing: .06em;
+    padding: 3px 8px; border-radius: 5px; cursor: pointer; }
+  .mini:hover { color: #e6f0fa; border-color: #3b5874; }
+  .mini.ok { border-color: #166534; color: #86efac; } .mini.no { border-color: #9f1239; color: #fda4af; }
+  .chip { display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line2);
+    color: var(--muted); margin: 0 4px 4px 0; }
+  .chip.on { border-color: var(--cyan); color: #bae6fd; }
 
   /* ---------- office ---------- */
-  #office-wrap { position: relative; background: #05080c; overflow: hidden; }
-  #office { display: block; width: 100%; height: 400px; }
-  .office-legend {
-    display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 12px;
-    border-top: 1px solid var(--line); font-size: 10px; color: var(--dim);
-    background: #080d13;
-  }
-  .office-legend b { color: var(--muted); font-weight: 600; }
-
-  /* ---------- roster ---------- */
-  .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
-  .agent {
-    border: 1px solid var(--line); border-left: 3px solid var(--dim);
-    border-radius: 8px; background: var(--panel-2); padding: 9px 10px; cursor: pointer;
-    transition: border-color .15s, transform .15s;
-  }
-  .agent:hover { border-color: #2b3d52; transform: translateY(-1px); }
-  .agent.selected { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(56,189,248,.25) inset; }
-  .agent .row1 { display: flex; align-items: center; gap: 7px; }
-  .agent .aname { font-size: 12px; font-weight: 700; color: #e6eff8; }
-  .agent .state { margin-left: auto; font-size: 9px; letter-spacing: .1em; color: var(--dim); }
-  .agent .role { margin-top: 2px; font-size: 10px; color: var(--muted); }
-  .agent .meta { margin-top: 7px; display: flex; gap: 10px; font-size: 10px; color: var(--dim); }
-  .agent .meta b { color: #b9cbe0; font-weight: 700; }
-
-  /* ---------- feed ---------- */
-  #feed { height: 430px; overflow: auto; padding: 8px 10px; }
-  .feed-row {
-    display: grid; grid-template-columns: 52px 86px 1fr; gap: 8px;
-    padding: 6px 6px; border-left: 2px solid transparent; border-radius: 4px;
-  }
-  .feed-row + .feed-row { border-top: 1px solid #0e151f; }
-  .feed-row:hover { background: #0a1118; }
-  .feed-row .t { color: var(--dim); font-size: 10px; padding-top: 1px; }
-  .feed-row .a { color: #9fb3c8; font-size: 10px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .feed-row .m { color: #b6c6d8; font-size: 11px; line-height: 1.45; word-break: break-word; }
-  .feed-row .m .tag { font-size: 9px; letter-spacing: .08em; margin-right: 6px; padding: 1px 5px; border-radius: 3px; border: 1px solid currentColor; }
-  .filters { display: flex; gap: 4px; margin-left: auto; }
-  .filters button {
-    background: #080d13; color: var(--dim); border: 1px solid var(--line);
-    border-radius: 4px; font: inherit; font-size: 9px; letter-spacing: .08em;
-    padding: 3px 6px; cursor: pointer;
-  }
-  .filters button.on { color: #dbe9f6; border-color: #33506b; background: #0f1822; }
-
-  /* ---------- tasks ---------- */
-  .tasks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-  @media (max-width: 760px) { .tasks { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-  .col { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px; min-height: 120px; }
-  .col h3 { margin: 0 0 6px; font-size: 9px; letter-spacing: .12em; color: var(--muted); display: flex; justify-content: space-between; }
-  .col h3 span { color: #dbe9f6; }
-  .task { border-left: 2px solid var(--dim); padding: 5px 6px; margin-bottom: 5px; background: #0a1017; border-radius: 3px; }
-  .task .tt { font-size: 10px; color: #c6d6e6; line-height: 1.35; }
-  .task .ta { font-size: 9px; color: var(--dim); margin-top: 3px; }
-  .task.running { border-left-color: var(--cyan); }
-  .task.done { border-left-color: var(--emerald); }
-  .task.failed { border-left-color: var(--rose); }
-  .empty { color: var(--dim); font-size: 10px; font-style: italic; padding: 4px 2px; }
-
-  /* ---------- positions ---------- */
-  .pos { display: grid; grid-template-columns: 76px 52px 1fr auto; gap: 8px; align-items: center;
-         padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); margin-bottom: 6px; }
-  .pos .epic { font-size: 11px; font-weight: 700; color: #e6eff8; }
-  .pos .side { font-size: 9px; letter-spacing: .1em; padding: 2px 6px; border-radius: 3px; text-align: center; }
-  .pos .side.buy { color: #052e1f; background: var(--emerald); }
-  .pos .side.sell { color: #2e0710; background: var(--rose); }
-  .pos .nums { font-size: 10px; color: var(--muted); line-height: 1.5; }
-  .pos .nums b { color: #c6d6e6; }
-  .pos .upl { font-size: 11px; font-weight: 700; }
-  .pos .upl.up { color: var(--emerald); }
-  .pos .upl.down { color: var(--rose); }
-
-  /* ---------- lessons ---------- */
-  .lesson { padding: 7px 0; border-bottom: 1px solid #0e151f; }
-  .lesson:last-child { border-bottom: 0; }
-  .lesson .lh { display: flex; align-items: center; gap: 6px; font-size: 9px; color: var(--dim); }
-  .lesson .lh b { color: #a9bdd2; font-weight: 700; }
-  .lesson .lh .conf { margin-left: auto; }
-  .lesson .lt { margin-top: 3px; font-size: 11px; color: #c2d2e2; line-height: 1.45; }
+  #office-wrap { position: relative; background: #05080c; }
+  #office { display: block; width: 100%; height: auto; cursor: pointer; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 7px 12px; border-top: 1px solid var(--line);
+    font-size: 10px; color: var(--dim); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .offline { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column;
+    background: rgba(5, 8, 12, .82); color: #fecdd3; font-size: 34px; font-weight: 900; letter-spacing: .3em; }
+  .offline small { font-size: 12px; letter-spacing: .08em; color: var(--muted); font-weight: 400; margin-top: 8px; }
+  .offline.show { display: flex; }
 
   /* ---------- inspector ---------- */
-  #inspector .panel-body { min-height: 92px; }
-  #inspector .iname { font-size: 13px; font-weight: 700; color: #e8f1fa; }
-  #inspector .irow { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 10px; color: var(--muted); }
-  #inspector .irow b { color: #c6d6e6; }
-  #inspector .iact { margin-top: 8px; font-size: 11px; color: #b6c6d8; line-height: 1.5; }
+  .insp-name { font-size: 16px; font-weight: 800; letter-spacing: .06em; }
+  .insp-role { color: var(--muted); margin-bottom: 8px; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 3px 8px; font-size: 11px; margin: 8px 0; }
+  .kv span:nth-child(odd) { color: var(--dim); }
+  .state { display: inline-block; padding: 2px 8px; border-radius: 5px; font-weight: 700; font-size: 10px; letter-spacing: .1em; }
+  .sec { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .sec h3 { margin: 0 0 6px; font-size: 10px; letter-spacing: .18em; color: #9fb4c8; }
+  .spark { display: block; width: 100%; height: 34px; }
+  pre.pb { white-space: pre-wrap; background: #08111a; border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+    margin: 0; color: #c6d6e6; font-size: 11px; max-height: 180px; overflow: auto; }
+  .lesson { padding: 6px 0; border-bottom: 1px dashed #18283a; font-size: 11px; display: flex; gap: 8px; }
+  .lesson .txt { flex: 1; } .lesson .meta { color: var(--dim); font-size: 10px; }
+  .disputed { color: var(--amber); font-weight: 700; font-size: 10px; }
+  .act { padding: 4px 0; border-bottom: 1px solid #0f1a25; font-size: 11px; }
+  .act .t { color: var(--dim); margin-right: 6px; } .act .ty { font-weight: 700; margin-right: 6px; }
 
-  /* ---------- overlays ---------- */
-  .overlay {
-    position: fixed; inset: 0; background: rgba(4,7,11,.86); backdrop-filter: blur(3px);
-    display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
-  }
-  .overlay.show { display: flex; }
-  .card {
-    width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; padding: 20px;
-  }
-  .card h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .14em; color: #dbe9f6; }
-  .card p { margin: 0 0 14px; font-size: 11px; color: var(--muted); line-height: 1.6; }
-  .card input {
-    width: 100%; background: #060b10; border: 1px solid var(--line); color: var(--text);
-    border-radius: 6px; padding: 9px 10px; font: inherit; font-size: 12px; margin-bottom: 10px;
-  }
-  .card input:focus { outline: none; border-color: #2f4a63; }
-  .card button {
-    width: 100%; background: #10202e; border: 1px solid #2c4a63; color: #d7e8f7;
-    border-radius: 6px; padding: 9px 12px; font: inherit; font-size: 11px; letter-spacing: .1em; cursor: pointer;
-  }
-  .card button:hover { background: #142a3c; }
-  .toast {
-    position: fixed; right: 16px; bottom: 16px; z-index: 60;
-    background: #161019; border: 1px solid #5b2130; color: #ffd9df;
-    padding: 10px 14px; border-radius: 8px; font-size: 11px; display: none;
-  }
-  .toast.show { display: block; }
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { text-align: left; font-size: 9px; letter-spacing: .14em; color: var(--dim); font-weight: 400; padding: 5px 6px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+  td { padding: 5px 6px; border-bottom: 1px solid #0f1a25; vertical-align: top; }
+  .lane { font-weight: 800; font-size: 10px; padding: 1px 6px; border-radius: 4px; letter-spacing: .06em; }
+  .lane.PASS { background: #064e3b; color: #a7f3d0; } .lane.FORWARD_TEST { background: #1e3a5f; color: #bfdbfe; }
+  .lane.EXPLORE { background: #3b2f0b; color: #fde68a; } .lane.FAIL, .lane.INSUFFICIENT_DATA { background: #3b0d16; color: #fecdd3; }
+  .lane.NONE { background: #1a2532; color: var(--muted); }
+  .up { color: var(--emerald); } .down { color: var(--rose); } .muted { color: var(--muted); }
+  pre.diff { margin: 6px 0; padding: 6px; background: #08111a; border-radius: 6px; font-size: 10.5px; white-space: pre-wrap; }
+  pre.diff .add { color: #86efac; } pre.diff .del { color: #fda4af; }
+  .approval { border: 1px solid var(--line2); border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+
+  /* ---------- feed / tasks / positions ---------- */
+  .filters { display: flex; gap: 4px; flex-wrap: wrap; }
+  .filters button { background: transparent; border: 1px solid var(--line2); color: var(--muted); padding: 2px 8px;
+    border-radius: 999px; font-size: 10px; cursor: pointer; }
+  .filters button.on { border-color: var(--cyan); color: #bae6fd; }
+  #feed { max-height: 320px; overflow: auto; }
+  .ev { display: grid; grid-template-columns: 62px 120px 1fr; gap: 8px; padding: 4px 12px; border-bottom: 1px solid #0d151e;
+    font-size: 11px; }
+  .ev .who { color: #c9d8e6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ev .tag { font-size: 9px; letter-spacing: .08em; border: 1px solid; border-radius: 3px; padding: 0 4px; margin-right: 6px; }
+  .tasks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .col { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px; min-height: 80px; }
+  .col h4 { margin: 0 0 4px; font-size: 9px; letter-spacing: .14em; color: var(--dim); display: flex; }
+  .col h4 b { margin-left: auto; color: var(--muted); }
+  .card { font-size: 10.5px; background: #0b141d; border: 1px solid #172433; border-radius: 4px; padding: 4px 6px; margin-bottom: 4px; }
+  .pos { display: grid; grid-template-columns: 70px 44px 1fr auto; gap: 8px; align-items: center; padding: 6px 0;
+    border-bottom: 1px solid #0f1a25; }
+  .side { font-size: 9px; letter-spacing: .08em; padding: 2px 5px; border-radius: 3px; text-align: center; font-weight: 700; }
+  .side.buy { color: #052e1f; background: var(--emerald); } .side.sell { color: #2e0710; background: var(--rose); }
+
   /* ---------- archive / trade history ---------- */
-  .folder-bar {
-    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
-    border-bottom: 1px solid var(--line); background: #080e14;
-  }
-  .folder-tab {
-    font-size: 10px; letter-spacing: .08em; color: #cfe2f5;
-    background: #0e1926; border: 1px solid #24384c; border-bottom: 0;
-    border-radius: 5px 5px 0 0; padding: 4px 9px;
-  }
-  .folder-stat { font-size: 10px; color: var(--dim); margin-left: auto; }
-  .folder-stat b { color: #b9cbe0; font-weight: 700; }
-  .mini {
-    background: #0d1620; border: 1px solid var(--line); color: var(--muted);
-    font: inherit; font-size: 9px; letter-spacing: .08em; padding: 3px 7px;
-    border-radius: 4px; cursor: pointer;
-  }
-  .mini:hover { color: #dbe9f6; border-color: #33506b; }
-  .ledger { max-height: 340px; overflow: auto; }
-  .ledger-row {
-    display: grid;
-    grid-template-columns: 118px 84px 52px 78px minmax(70px, 1fr) minmax(70px, 1fr) 96px 66px;
-    gap: 8px; align-items: center; padding: 6px 12px;
-    border-bottom: 1px solid #0d141d; font-size: 11px; color: #b6c6d8;
-  }
-  .ledger-row:hover { background: #0a1118; }
-  .ledger-head {
-    position: sticky; top: 0; z-index: 1;
-    background: #090f16; border-bottom: 1px solid var(--line);
-    font-size: 9px; letter-spacing: .12em; color: var(--dim); text-transform: uppercase;
-  }
+  .folder-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: #080e14; }
+  .folder-tab { font-size: 10px; letter-spacing: .08em; color: #cfe2f5; background: #0e1926; border: 1px solid #24384c;
+    border-bottom: 0; border-radius: 5px 5px 0 0; padding: 4px 9px; }
+  .folder-stat { font-size: 10px; color: var(--dim); margin-left: auto; } .folder-stat b { color: #b9cbe0; }
+  .ledger { max-height: 300px; overflow: auto; }
+  .ledger-row { display: grid; grid-template-columns: 110px 80px 50px 74px minmax(70px, 1fr) minmax(70px, 1fr) 96px 60px;
+    gap: 8px; align-items: center; padding: 5px 12px; border-bottom: 1px solid #0d141d; font-size: 11px; color: #b6c6d8; }
+  .ledger-head { position: sticky; top: 0; background: #090f16; font-size: 9px; letter-spacing: .12em; color: var(--dim); }
   .ledger .epic { font-weight: 700; color: #e6eff8; }
-  .ledger .side { font-size: 9px; letter-spacing: .08em; padding: 2px 5px; border-radius: 3px; text-align: center; }
-  .ledger .side.buy { color: #052e1f; background: var(--emerald); }
-  .ledger .side.sell { color: #2e0710; background: var(--rose); }
-  .ledger .pnl.up { color: var(--emerald); font-weight: 700; }
-  .ledger .pnl.down { color: var(--rose); font-weight: 700; }
-  .ledger .st { font-size: 9px; letter-spacing: .08em; color: var(--dim); }
-  .ledger .st.open { color: var(--amber); }
-  .ledger .st.closed { color: var(--teal); }
-  .ledger .num { font-variant-numeric: tabular-nums; }
-  .ledger .dim { color: var(--dim); }
+  .ledger .pnl.up { color: var(--emerald); font-weight: 700; } .ledger .pnl.down { color: var(--rose); font-weight: 700; }
+  .ledger .st.open { color: var(--amber); } .ledger .st.closed { color: var(--teal); } .ledger .dim { color: var(--dim); }
 
-  ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: #1a2532; border-radius: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
+  .overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.7); z-index: 50; }
+  .overlay.show { display: flex; }
+  .overlay .box { background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 18px; width: min(420px, 92vw); }
+  .overlay input { width: 100%; padding: 8px; background: #08111a; color: var(--text); border: 1px solid var(--line2); border-radius: 6px; }
+  .toast { position: fixed; right: 16px; bottom: 16px; z-index: 60; background: #161019; border: 1px solid #5b2130;
+    color: #ffd9df; padding: 10px 14px; border-radius: 8px; display: none; }
+  .toast.show { display: block; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #1a2532; border-radius: 4px; }
 </style>
 </head>
 <body>
-<div class="app">
-  <header class="top">
-    <div class="brand">
-      <span class="name">TRADING FIRM</span>
-      <span class="ver">OPERATIONS FLOOR</span>
-    </div>
-    <span class="pill"><span id="ws-dot" class="dot"></span><span id="ws-label">CONNECTING</span></span>
-    <span class="pill"><span id="mode-dot" class="dot ok"></span><span id="mode-label">PAPER</span></span>
-    <span class="pill"><span id="broker-dot" class="dot"></span><span id="broker-label">BROKER —</span></span>
-
-    <div class="spacer"></div>
-
+<div class="wrap">
+  <header class="top" role="banner">
+    <div class="brand">TRADING FIRM<small>AUTONOMES BÜRO · KEIN GEWINNVERSPRECHEN</small></div>
+    <span class="mode PAPER" id="mode" aria-label="Modus">PAPER</span>
+    <span class="pill" title="Verbindung zum Dashboard-Server"><span id="ws-dot" class="dot"></span><span id="ws-label">VERBINDE</span></span>
+    <span class="pill" title="Broker-Kontostand: Alter des letzten Snapshots"><span id="broker-dot" class="dot"></span><span id="broker-label">BROKER —</span></span>
+    <span class="pill" title="Live-Kursstream (WebSocket)"><span id="stream-dot" class="dot"></span><span id="stream-label">KURSE —</span></span>
     <div class="metrics">
-      <div class="metric"><span class="k">BALANCE</span><span class="v" id="balance">—</span></div>
+      <div class="metric"><span class="k">KONTOSTAND</span><span class="v" id="balance">—</span></div>
       <div class="metric"><span class="k">EQUITY</span><span class="v" id="equity">—</span></div>
-      <div class="metric"><span class="k">OPEN P/L</span><span class="v" id="pnl">—</span></div>
-      <div class="metric"><span class="k">LESSONS</span><span class="v" id="lesson-count">0</span></div>
-      <div class="metric"><span class="k">LLM</span><span class="v" id="llm" style="font-size:11px">—</span></div>
+      <div class="metric"><span class="k">TAGES-P/L</span><span class="v" id="daypnl">—</span></div>
+      <div class="metric"><span class="k">DRAWDOWN HEUTE</span><span class="v" id="daydd">—</span></div>
+      <div class="metric"><span class="k">TOKENS HEUTE</span><span class="v small" id="tokens">—</span></div>
+      <div class="metric"><span class="k">LLM</span><span class="v small" id="llm">—</span></div>
     </div>
-
-    <button class="kill" id="kill">■ KILL SWITCH</button>
+    <button class="kill" id="kill" aria-label="Kill Switch: alles glattstellen und anhalten">■ KILL SWITCH</button>
   </header>
 
-  <div class="grid-main">
+  <div class="alarms" id="alarms" role="alert" aria-live="polite"></div>
+
+  <div class="main">
     <section class="panel">
-      <div class="panel-head">
-        <h2>OFFICE FLOOR</h2>
-        <span class="hint" id="floor-hint">live agents</span>
+      <div class="panel-head"><h2>BÜRO</h2><span class="hint" id="floor-hint">Klick auf einen Roboter: Details</span></div>
+      <div id="office-wrap">
+        <canvas id="office" width="1200" height="720" tabindex="0" aria-label="Büroansicht mit Robotern; Tab wählt Agenten"></canvas>
+        <div class="offline" id="offline">OFFLINE<small>Backend nicht erreichbar · angezeigte Werte sind nicht aktuell</small></div>
       </div>
-      <div id="office-wrap"><canvas id="office"></canvas></div>
-      <div class="office-legend">
-        <span><b>click</b> a robot to inspect</span>
-        <span><b style="color:var(--amber)">amber visor</b> thinking</span>
-        <span><b style="color:var(--emerald)">green visor</b> learned</span>
-        <span><b style="color:var(--cyan)">typing</b> working</span>
+      <div class="legend">
+        <span><i style="background:var(--cyan)"></i>arbeitet</span>
+        <span><i style="background:var(--amber)"></i>denkt</span>
+        <span><i style="background:var(--violet)"></i>Werkzeug / Aktion</span>
+        <span><i style="background:var(--emerald)"></i>hat gelernt</span>
+        <span><i style="background:var(--rose)"></i>Fehler / verworfen</span>
+        <span><i style="background:#4b5563"></i>wartet · Budget leer</span>
+        <span>✉ Aufgabe wird übergeben · ✦ neuer Mitarbeiter</span>
       </div>
-      <div class="panel-head" style="border-top:1px solid var(--line); border-bottom:0"><h2>STAFF</h2><span class="hint" id="staff-hint"></span></div>
-      <div class="panel-body"><div class="roster" id="roster"></div></div>
     </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h2>LIVE FEED</h2>
-        <div class="filters" id="filters">
-          <button data-f="all" class="on">ALL</button>
-          <button data-f="TRADE">TRADES</button>
-          <button data-f="THOUGHT">THINK</button>
-          <button data-f="LEARNED">LEARNED</button>
-          <button data-f="TASK">TASKS</button>
-        </div>
-      </div>
-      <div id="feed"><div class="empty">waiting for events…</div></div>
+    <section class="panel" id="inspector" aria-live="polite">
+      <div class="panel-head"><h2>MITARBEITER</h2><span class="hint" id="inspector-hint">Roboter auswählen</span></div>
+      <div class="panel-body" id="insp" style="max-height: 760px"><div class="empty">Klick auf einen Roboter im Büro.</div></div>
     </section>
   </div>
 
-  <div class="grid-bottom">
+  <div class="row2">
     <section class="panel">
-      <div class="panel-head"><h2>TASK BOARD</h2><span class="hint" id="task-hint"></span></div>
+      <div class="panel-head"><h2>STRATEGIE-WAND</h2><span class="hint" id="wall-hint">—</span></div>
+      <div class="panel-body" style="max-height: 320px"><table id="wall"><tbody><tr><td class="empty">noch keine Forschungsurteile</td></tr></tbody></table></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>FREIGABEN</h2><span class="hint">nur du entscheidest</span></div>
+      <div class="panel-body" id="approvals" style="max-height: 320px"><div class="empty">nichts offen</div></div>
+    </section>
+  </div>
+
+  <div class="row3">
+    <section class="panel">
+      <div class="panel-head"><h2>OFFENE POSITIONEN</h2><span class="hint" id="pos-hint">Broker</span></div>
+      <div class="panel-body" id="positions" style="max-height: 260px"><div class="empty">keine offenen Positionen</div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>AUFGABEN</h2><span class="hint" id="task-hint">—</span></div>
       <div class="panel-body"><div class="tasks" id="tasks"></div></div>
     </section>
-
     <section class="panel">
-      <div class="panel-head"><h2>STRATEGY GATE</h2><span class="hint" id="gate-hint">why the desk trades (or not)</span></div>
-      <div class="panel-body" id="gate" style="max-height:300px"><div class="empty">no research verdicts yet</div></div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head"><h2>OPEN POSITIONS</h2><span class="hint" id="pos-hint">broker truth</span></div>
-      <div class="panel-body" id="positions" style="max-height:300px"><div class="empty">no open positions</div></div>
+      <div class="panel-head"><h2>GELERNT</h2><span class="hint" id="lesson-hint">Hinweise, keine Befehle</span></div>
+      <div class="panel-body" id="lessons" style="max-height: 260px"><div class="empty">noch keine Lektionen</div></div>
     </section>
   </div>
 
-  <div class="grid-bottom">
-    <section class="panel">
-      <div class="panel-head"><h2>LEARNED BY THE FIRM</h2><span class="hint">advisory notes only</span></div>
-      <div class="panel-body" id="lessons" style="max-height:280px"><div class="empty">no lessons yet</div></div>
-    </section>
-
-    <section class="panel" id="inspector">
-      <div class="panel-head"><h2>INSPECTOR</h2><span class="hint" id="inspector-hint">select an agent</span></div>
-      <div class="panel-body">
-        <div class="iname" id="i-name">—</div>
-        <div class="irow" id="i-meta"></div>
-        <div class="iact" id="i-act">Click a robot or a staff card to see what that agent is doing.</div>
-      </div>
-    </section>
-  </div>
+  <section class="panel">
+    <div class="panel-head"><h2>TELEMETRIE</h2>
+      <div class="filters" id="filters" role="toolbar" aria-label="Filter">
+        <button data-f="all" class="on">ALLE</button><button data-f="trades">TRADES</button>
+        <button data-f="agents">AGENTEN</button><button data-f="alerts">ALARME</button><button data-f="research">FORSCHUNG</button>
+      </div></div>
+    <div id="feed" aria-live="off"><div class="empty" style="padding:8px 12px">warte auf Ereignisse…</div></div>
+  </section>
 
   <section class="panel" id="archive-panel">
-    <div class="panel-head">
-      <h2>TRADE HISTORY</h2>
-      <span class="hint" id="archive-hint">archive</span>
-    </div>
+    <div class="panel-head"><h2>TRADE HISTORY</h2><span class="hint" id="archive-hint">Archiv</span></div>
     <div class="folder-bar">
       <span class="folder-tab" id="archive-path">archiv/trades</span>
       <span class="folder-stat" id="archive-stats">—</span>
-      <button class="mini" id="archive-refresh">REFRESH</button>
+      <button class="mini" id="archive-refresh">AKTUALISIEREN</button>
     </div>
     <div class="ledger" id="ledger">
-      <div class="ledger-row ledger-head">
-        <span>time</span><span>market</span><span>side</span><span>size</span>
-        <span>entry</span><span>exit</span><span>P/L</span><span>status</span>
-      </div>
-      <div class="empty" style="padding:10px 12px">no trades archived yet</div>
+      <div class="ledger-row ledger-head"><span>zeit</span><span>markt</span><span>seite</span><span>grösse</span>
+        <span>einstieg</span><span>ausstieg</span><span>P/L</span><span>status</span></div>
+      <div class="empty" style="padding:10px 12px">noch keine Trades archiviert</div>
     </div>
   </section>
 </div>
 
 <div class="overlay" id="token-overlay">
-  <div class="card">
-    <h3>API TOKEN REQUIRED</h3>
-    <p>The firm API is protected. Enter the value of <b>FIRM_API_TOKEN</b> from your <b>.env</b>.</p>
+  <div class="box">
+    <h3 style="margin-top:0">API-TOKEN NÖTIG</h3>
+    <p>Das Dashboard ist geschützt. Gib den Wert von <b>FIRM_API_TOKEN</b> aus deiner <b>.env</b> ein.</p>
     <input id="token-input" type="password" placeholder="FIRM_API_TOKEN" autocomplete="off">
-    <button id="token-save">CONNECT</button>
+    <p><button class="mini ok" id="token-save">VERBINDEN</button></p>
   </div>
 </div>
-
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status"></div>
 
 <script>
 (() => {
   "use strict";
-
+  // =============================================================== state
   const state = {
-    token: "",
-    status: null,
-    agents: [],
-    tasks: [],
-    lessons: [],
-    archive: null,
-    hiring: [],
-    events: [],
-    filter: "all",
-    connected: false,
-    selected: null,
-    lastEventByAgent: {},
-    pulses: [],
+    token: "", status: null, agents: [], tasks: [], lessons: [], archive: null, hiring: [],
+    playbooks: { active: {}, pending: [] }, events: [], filter: "all", connected: false, apiOk: false,
+    selected: null, lastByAgent: {}, inspFilter: "all",
   };
-
   const $ = (id) => document.getElementById(id);
-  const PALETTE = ["#38bdf8", "#34d399", "#fbbf24", "#a78bfa", "#fb7185", "#2dd4bf", "#f472b6", "#93c5fd"];
-  const TYPE_COLOR = {
-    THOUGHT: "var(--amber)",
-    RESULT: "var(--cyan)",
-    LEARNED: "var(--emerald)",
-    TASK_CREATED: "var(--dim)",
-    TASK_STARTED: "var(--cyan)",
-    TASK_COMPLETED: "var(--emerald)",
-    TASK_FAILED: "var(--rose)",
-    TASKS_REQUEUED: "var(--amber)",
-    ACCOUNT_SNAPSHOT: "var(--teal)",
-    ORDER_FILLED: "var(--violet)",
-    SIGNAL: "var(--violet)",
-    TRADE_REJECTED: "var(--rose)",
-    POSITION_CLOSED: "var(--teal)",
-    DESK_CYCLE: "var(--dim)",
-    TRADING_HALTED: "var(--rose)",
-    TOOL_CALL: "var(--cyan)",
-    TOOL_RESULT: "var(--muted)",
-  };
-  const TRADE_TYPES = ["SIGNAL", "ORDER_FILLED", "TRADE_REJECTED", "POSITION_CLOSED", "DESK_CYCLE", "TRADING_HALTED"];
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const parse = (raw) => { if (raw && typeof raw === "object") return raw; try { return JSON.parse(raw || "{}"); } catch { return {}; } };
+  const short = (s, n = 200) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n) + "…" : t; };
+  const timeOf = (ts) => (String(ts || "").match(/T(\d{2}:\d{2}:\d{2})/) || [, "--:--:--"])[1];
+  const money = (v) => (v === null || v === undefined || !isFinite(Number(v))) ? "—"
+    : Number(v).toLocaleString("de-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const priceFmt = (v) => { const n = Number(v); if (!isFinite(n)) return "—"; return n >= 1000 ? n.toLocaleString("de-CH", { maximumFractionDigits: 2 }) : n.toFixed(n < 10 ? 5 : 2); };
+  const ageSec = (ts) => ts ? (Date.now() - Date.parse(String(ts).endsWith("Z") ? ts : ts + "Z")) / 1000 : null;
+  const fmtAge = (s) => s === null ? "—" : s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+  const fmtTime = (ts) => { const m = String(ts || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/); return m ? `${m[3]}.${m[2]} ${m[4]}:${m[5]}` : "—"; };
 
-  const colorFor = (name) => {
-    let h = 0;
-    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-    return PALETTE[h % PALETTE.length];
-  };
+  const TYPE_COLOR = { THOUGHT: "#fbbf24", RESULT: "#38bdf8", LEARNED: "#34d399", TOOL_CALL: "#a78bfa", ACTION: "#a78bfa",
+    ACTION_REJECTED: "#fb7185", AGENT_INVALID: "#fb7185", TASK_CREATED: "#607588", TASK_STARTED: "#38bdf8",
+    TASK_COMPLETED: "#34d399", TASK_FAILED: "#fb7185", ORDER_FILLED: "#a78bfa", SIGNAL: "#a78bfa", TRADE_REJECTED: "#fb7185",
+    POSITION_CLOSED: "#2dd4bf", TRADE_RESULT: "#2dd4bf", TRADING_HALTED: "#ef4444", STRATEGY_STOPPED: "#ef4444",
+    RESEARCH_STARTED: "#93c5fd", RESEARCH_DONE: "#34d399", RESEARCH_FAILED: "#fb7185", DESK_STATUS: "#607588",
+    RISK_TIGHTENED: "#fbbf24", AGENT_HIRED: "#34d399", PLAYBOOK_PROPOSED: "#93c5fd", LESSON_CONFLICT: "#fbbf24" };
+  const TRADE_TYPES = ["SIGNAL", "ORDER_FILLED", "TRADE_REJECTED", "POSITION_CLOSED", "TRADE_RESULT", "DESK_STATUS", "TRADING_HALTED", "STRATEGY_STOPPED"];
+  const ALERT_TYPES = ["TRADING_HALTED", "STRATEGY_STOPPED", "STRATEGY_WARNING", "BROKER_OFFLINE", "DESK_IDLE", "RESEARCH_FAILED",
+    "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "ACTION_REJECTED"];
+  const RESEARCH_TYPES = ["RESEARCH_STARTED", "RESEARCH_DONE", "RESEARCH_FAILED", "RESEARCH_REQUESTED"];
+  const HIDDEN = ["ACCOUNT_SNAPSHOT"];
 
-  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[c]));
-
-  const parsePayload = (raw) => {
-    if (raw && typeof raw === "object") return raw;
-    try { return JSON.parse(raw || "{}"); } catch { return {}; }
-  };
-
-  const short = (s, n = 260) => {
-    const t = String(s ?? "").replace(/\s+/g, " ").trim();
-    return t.length > n ? t.slice(0, n) + "…" : t;
-  };
-
-  const timeOf = (ts) => {
-    const m = String(ts || "").match(/T(\d{2}:\d{2}:\d{2})/);
-    return m ? m[1] : "--:--:--";
-  };
-
-  const money = (v) => (v === null || v === undefined || isNaN(Number(v)))
-    ? "—"
-    : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  const priceFmt = (v) => {
-    const n = Number(v);
-    if (!isFinite(n)) return "—";
-    return n >= 1000 ? n.toLocaleString("en-US", { maximumFractionDigits: 2 })
-                     : n.toFixed(n < 10 ? 5 : 2);
-  };
-
-  // ---------------------------------------------------------------- api
+  // =============================================================== api
   const authHeaders = () => state.token ? { Authorization: "Bearer " + state.token } : {};
-
-  async function api(path) {
-    const res = await fetch(path, { headers: authHeaders(), cache: "no-store" });
-    if (res.status === 401) { showTokenOverlay(); throw new Error("unauthorized"); }
+  async function api(path, opts = {}) {
+    const res = await fetch(path, { cache: "no-store", ...opts, headers: { ...authHeaders(), ...(opts.headers || {}) } });
+    if (res.status === 401) { $("token-overlay").classList.add("show"); throw new Error("unauthorized"); }
     if (!res.ok) throw new Error(path + " -> " + res.status);
     return res.json();
   }
-
-  function showTokenOverlay() {
-    $("token-overlay").classList.add("show");
-    $("token-input").focus();
-  }
-
-  function toast(msg) {
-    const el = $("toast");
-    el.textContent = msg;
-    el.classList.add("show");
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => el.classList.remove("show"), 5000);
-  }
-
-  // ---------------------------------------------------------------- data
-  async function loadAll() {
-    const [status, agents, tasks, lessons, archive, hiring] = await Promise.allSettled([
-      api("/api/status"), api("/api/agents"), api("/api/tasks"), api("/api/lessons"),
-      api("/api/archive?limit=200"), api("/api/hiring"),
-    ]);
-    if (hiring.status === "fulfilled") state.hiring = hiring.value.requests || [];
-    if (status.status === "fulfilled") state.status = status.value;
-    if (agents.status === "fulfilled") state.agents = agents.value.agents || [];
-    if (tasks.status === "fulfilled") state.tasks = tasks.value.tasks || [];
-    if (lessons.status === "fulfilled") state.lessons = lessons.value.lessons || [];
-    if (archive.status === "fulfilled") state.archive = archive.value;
-    renderAll();
-  }
-
-  async function refreshArchive() {
-    try {
-      state.archive = await api("/api/archive?limit=200");
-      renderArchive();
-    } catch { /* transient */ }
-  }
-
-  async function refreshTasks() {
-    try {
-      const data = await api("/api/tasks");
-      state.tasks = data.tasks || [];
-      renderTasks();
-      renderTaskHint();
-      renderRoster();
-    } catch { /* transient */ }
-  }
-
-  async function refreshLessons() {
-    try {
-      const data = await api("/api/lessons");
-      state.lessons = data.lessons || [];
-      renderLessons();
-      renderLessonCount();
-      await refreshAgents();
-    } catch { /* transient */ }
-  }
-
-  async function refreshAgents() {
-    try {
-      const data = await api("/api/agents");
-      state.agents = data.agents || [];
-      renderRoster();
-      refreshFloor();
-    } catch { /* transient */ }
-  }
+  const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  function toast(msg) { const el = $("toast"); el.textContent = msg; el.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("show"), 5000); }
 
   async function refreshStatus() {
-    try {
-      state.status = await api("/api/status");
-      try { state.hiring = (await api("/api/hiring")).requests; } catch (e) { /* hiring list optional */ }
-      renderHeader();
-      renderPositions();
-      renderLessonCount();
-    } catch { /* transient */ }
+    try { state.status = await api("/api/status"); state.apiOk = true; } catch { state.apiOk = false; }
+    renderHeader(); renderAlarms(); renderWall(); renderPositions(); renderApprovals(); setOffline();
+  }
+  async function refreshAgents() { try { state.agents = (await api("/api/agents")).agents || []; syncRobots(); renderInspector(); } catch {} }
+  async function refreshTasks() { try { state.tasks = (await api("/api/tasks")).tasks || []; renderTasks(); } catch {} }
+  async function refreshLessons() { try { state.lessons = (await api("/api/lessons?limit=20")).lessons || []; renderLessons(); renderInspector(); } catch {} }
+  async function refreshArchive() { try { state.archive = await api("/api/archive?limit=200"); renderArchive(); } catch {} }
+  async function refreshApprovals() {
+    try { state.hiring = (await api("/api/hiring")).requests || []; } catch {}
+    try { state.playbooks = await api("/api/playbooks"); } catch {}
+    renderApprovals(); renderInspector();
+  }
+  async function loadAll() {
+    await Promise.allSettled([refreshStatus(), refreshAgents(), refreshTasks(), refreshLessons(), refreshArchive(), refreshApprovals()]);
   }
 
-  // ---------------------------------------------------------------- render
-  function renderAll() {
-    renderHeader();
-    renderRoster();
-    renderFeed();
-    renderTasks();
-    renderPositions();
-    renderGate();
-    renderLessons();
-    renderArchive();
-    renderLessonCount();
-    renderTaskHint();
-    refreshFloor();
-    renderInspector();
-  }
-
+  // =============================================================== header / alarms
+  function setOffline() { $("offline").classList.toggle("show", !state.connected && !state.apiOk); }
   function renderHeader() {
-    const s = state.status || {};
-    $("mode-label").textContent = s.mode || "PAPER";
-    $("mode-dot").className = "dot " + (s.kill_switch_active ? "bad" : "ok");
-
-    const llm = s.llm_provider ? `${s.llm_provider} · ${s.llm_model || "?"}` : "—";
-    $("llm").textContent = llm;
-
-    $("balance").innerHTML = money(s.balance) === "—" ? "—" : `${money(s.balance)} <small>CHF</small>`;
-    $("equity").innerHTML = money(s.equity) === "—" ? "—" : `${money(s.equity)} <small>CHF</small>`;
-
-    const pnl = s.profit_loss;
-    const pnlEl = $("pnl");
-    if (pnl === null || pnl === undefined) {
-      pnlEl.textContent = "—";
-      pnlEl.className = "v";
-    } else {
-      const n = Number(pnl);
-      pnlEl.textContent = (n > 0 ? "+" : "") + money(n);
-      pnlEl.className = "v " + (n > 0 ? "up" : (n < 0 ? "down" : ""));
+    const s = state.status;
+    const ok = !!s && state.apiOk;
+    const mode = (s && s.mode) || "PAPER";
+    $("mode").textContent = mode; $("mode").className = "mode " + mode;
+    const set = (id, v, cls) => { $(id).textContent = v; $(id).className = "v" + (cls ? " " + cls : "") + (id === "tokens" || id === "llm" ? " small" : ""); };
+    if (!ok) { ["balance", "equity", "daypnl", "daydd", "tokens"].forEach((id) => set(id, "—")); }
+    else {
+      const ccy = (s.positions && s.positions[0] && s.positions[0].currency) ? "" : "";
+      set("balance", money(s.balance) + ccy); set("equity", money(s.equity));
+      const t = s.today || {};
+      set("daypnl", t.pnl == null ? "—" : (t.pnl > 0 ? "+" : "") + money(t.pnl), t.pnl == null ? "" : t.pnl >= 0 ? "up" : "down");
+      set("daydd", t.drawdown_pct == null ? "—" : t.drawdown_pct.toFixed(2) + " %", t.drawdown_pct > 1 ? "down" : "");
+      set("tokens", t.tokens == null ? "—" : Number(t.tokens).toLocaleString("de-CH"));
+      set("llm", `${s.llm_provider || "?"} · ${s.llm_model || "?"}`);
     }
-
-    const brokerLive = s.account_source === "broker";
-    $("broker-dot").className = "dot " + (brokerLive ? "ok" : (s.account_source === "mock" ? "warn" : ""));
-    $("broker-label").textContent = brokerLive ? "CAPITAL.COM" : (s.account_source === "mock" ? "MOCK" : "BROKER —");
+    const snapAge = ok ? ageSec(s.snapshot_ts) : null;
+    $("broker-dot").className = "dot " + (snapAge === null ? "" : snapAge < 180 ? "ok" : snapAge < 900 ? "warn" : "bad");
+    $("broker-label").textContent = snapAge === null ? "BROKER —" : `${String(s.account_source || "").toUpperCase() || "BROKER"} · ${fmtAge(snapAge)}`;
+    const st = ok && s.stream;
+    const ages = st && st.quote_age_s ? Object.values(st.quote_age_s) : [];
+    const maxAge = ages.length ? Math.max(...ages) : null;
+    $("stream-dot").className = "dot " + (!st ? "" : st.connected && maxAge !== null && maxAge < 30 ? "ok" : st.connected ? "warn" : "bad");
+    $("stream-label").textContent = !st ? "KURSE REST" : st.connected ? `KURSE LIVE · ${fmtAge(maxAge)}` : "KURSE AUS";
+  }
+  function renderAlarms() {
+    const list = (state.status && state.status.alerts) || [];
+    const dismissed = new Set(JSON.parse(sessionStorage.getItem("firm_dismissed") || "[]"));
+    const show = list.filter((a) => !dismissed.has(a.id)).slice(-6);
+    const box = $("alarms");
+    box.classList.toggle("show", show.length > 0);
+    box.innerHTML = show.map((a) => {
+      const warn = ["AGENT_INVALID", "LESSON_CONFLICT", "DESK_IDLE", "STRATEGY_WARNING", "FLAG"].includes(a.type);
+      return `<span class="alarm ${warn ? "warn" : ""}"><b>${esc(a.type)}</b> ${esc(timeOf(a.ts))} ${esc(a.agent || "")}: ${esc(short(a.text, 120))}</span>`;
+    }).join("") + (show.length ? `<button class="mini" id="alarm-clear">AUSBLENDEN</button>` : "");
+    const btn = $("alarm-clear");
+    if (btn) btn.onclick = () => { list.forEach((a) => dismissed.add(a.id)); sessionStorage.setItem("firm_dismissed", JSON.stringify([...dismissed])); renderAlarms(); };
   }
 
-  function renderLessonCount() {
-    const total = (state.status && state.status.lessons_learned) || state.lessons.length || 0;
-    $("lesson-count").textContent = String(total);
-  }
-
-  function runningSet() {
-    return new Set(state.tasks.filter((t) => t.status === "RUNNING").map((t) => t.assigned_to));
-  }
-
-  function agentState(name) {
-    const running = runningSet();
-    if (state.pulses.some((p) => p.agent === name && p.kind === "LEARNED" && Date.now() - p.at < 2200)) return "LEARNED";
-    const last = state.lastEventByAgent[name];
-    if (last && last.type === "THOUGHT" && Date.now() - (last._at || 0) < 12000) return "THINKING";
-    if (running.has(name)) return "RUNNING";
-    if (last && Date.now() - (last._at || 0) < 15000) return "RUNNING";
-    return "IDLE";
-  }
-
-  function renderRoster() {
-    const roster = $("roster");
-    if (!state.agents.length) {
-      roster.innerHTML = '<div class="empty">no agents loaded — check config/roles/*.yaml</div>';
-      return;
-    }
-    roster.innerHTML = "";
-    for (const a of state.agents) {
-      const st = agentState(a.name);
-      const label = st === "RUNNING" ? "RUNNING" : (st === "IDLE" ? "IDLE" : st);
-      const dotClass = st === "RUNNING" ? "warn" : (st === "IDLE" ? "" : "ok");
-      const card = document.createElement("div");
-      card.className = "agent" + (state.selected === a.name ? " selected" : "");
-      card.style.borderLeftColor = colorFor(a.name);
-      card.innerHTML = `
-        <div class="row1">
-          <span class="dot ${dotClass}"></span>
-          <span class="aname">${esc(a.name)}</span>
-          <span class="state">${label}</span>
-        </div>
-        <div class="role">${esc(a.role || "")}</div>
-        <div class="meta">
-          <span>lessons <b>${esc(a.lessons_learned ?? 0)}</b></span>
-          <span>model <b>${esc(a.model || "default")}</b></span>
-        </div>`;
-      card.addEventListener("click", () => selectAgent(a.name));
-      roster.appendChild(card);
-    }
-    $("staff-hint").textContent = state.agents.length + " active";
-  }
-
-  function feedMatches(evt) {
-    if (state.filter === "all") return true;
-    if (state.filter === "TASK") return String(evt.type || "").startsWith("TASK");
-    if (state.filter === "TRADE") return TRADE_TYPES.includes(evt.type);
-    return evt.type === state.filter;
-  }
-
-  function taskTitle(taskId) {
-    const task = state.tasks.find((t) => t.task_id === taskId);
-    return task ? task.title : taskId;
-  }
-
-  function eventText(evt) {
-    const p = parsePayload(evt.payload_json);
-    switch (evt.type) {
-      case "THOUGHT": return short(p.content || "");
-      case "RESULT": return short(p.deliverable || JSON.stringify(p));
-      case "LEARNED": return (p.lessons || []).map((l) => "• " + l).join(" ");
-      case "TASK_CREATED": return short(p.title || p.task_id);
-      case "TASK_STARTED": return short(p.title || taskTitle(p.task_id));
-      case "TASK_COMPLETED": return short(taskTitle(p.task_id));
-      case "TASK_FAILED": return short(p.error || taskTitle(p.task_id));
-      case "ACCOUNT_SNAPSHOT": return `balance ${money(p.balance)} · equity ${money(p.equity)} · ${p.open_positions ?? 0} open (${p.source || "?"})`;
-      case "SIGNAL": return `${p.side} ${p.epic} @ ${priceFmt(p.price)} · size ${p.size} · ${short(p.reason, 120)}`;
-      case "ORDER_FILLED": return `${p.side || ""} ${p.size ?? ""} ${p.epic || ""} filled @ ${priceFmt(p.price)}`;
-      case "TRADE_REJECTED": return `${p.epic}: ${short(p.reason, 150)}`;
-      case "POSITION_CLOSED": return `${p.epic} closed (${short(p.reason, 110)})`;
-      case "DESK_CYCLE": return `${(p.trades || []).length} new · ${(p.closed || []).length} closed · ${p.open_positions ?? 0} open`;
-      case "TRADING_HALTED": return short(p.reason, 160);
-      case "SYSTEM": return short(p.content || JSON.stringify(p));
-      default: return short(JSON.stringify(p));
-    }
-  }
-
-  function renderFeed() {
-    const feed = $("feed");
-    const rows = state.events.filter(feedMatches).slice(-90).reverse();
-    if (!rows.length) {
-      feed.innerHTML = '<div class="empty">waiting for events…</div>';
-      return;
-    }
-    const frag = document.createDocumentFragment();
-    for (const evt of rows) {
-      const row = document.createElement("div");
-      row.className = "feed-row";
-      const color = TYPE_COLOR[evt.type] || "var(--muted)";
-      row.style.borderLeftColor = color;
-      row.innerHTML = `
-        <span class="t">${timeOf(evt.ts)}</span>
-        <span class="a" title="${esc(evt.agent_id || "SYSTEM")}">${esc(evt.agent_id || "SYSTEM")}</span>
-        <span class="m"><span class="tag" style="color:${color}">${esc(evt.type)}</span>${esc(eventText(evt))}</span>`;
-      frag.appendChild(row);
-    }
-    feed.innerHTML = "";
-    feed.appendChild(frag);
-  }
-
-  function renderTasks() {
-    const groups = { PENDING: [], RUNNING: [], DONE: [], FAILED: [] };
-    for (const t of state.tasks) (groups[t.status] || groups.PENDING).push(t);
-    const board = $("tasks");
-    board.innerHTML = "";
-    for (const [status, list] of Object.entries(groups)) {
-      const col = document.createElement("div");
-      col.className = "col";
-      const items = list.slice(0, 5).map((t) => `
-        <div class="task ${status.toLowerCase()}">
-          <div class="tt">${esc(short(t.title || t.task_id, 90))}</div>
-          <div class="ta">${esc(t.assigned_to || "")}</div>
-        </div>`).join("");
-      col.innerHTML = `<h3>${status}<span>${list.length}</span></h3>${items || '<div class="empty">—</div>'}`;
-      board.appendChild(col);
-    }
-  }
-
-  function renderTaskHint() {
-    const c = { PENDING: 0, RUNNING: 0, DONE: 0, FAILED: 0 };
-    for (const t of state.tasks) if (c[t.status] !== undefined) c[t.status]++;
-    $("task-hint").textContent = `done ${c.DONE} · running ${c.RUNNING} · pending ${c.PENDING} · failed ${c.FAILED}`;
-  }
-
-  function renderPositions() {
-    const box = $("positions");
-    const list = (state.status && state.status.positions) || [];
-    $("pos-hint").textContent = list.length ? `${list.length} open` : "flat";
-    if (!list.length) {
-      box.innerHTML = '<div class="empty">no open positions — the desk is waiting for a signal</div>';
-      return;
-    }
-    box.innerHTML = "";
-    for (const p of list) {
-      const side = String(p.direction || "").toUpperCase();
-      const upl = (p.upl === null || p.upl === undefined) ? null : Number(p.upl);
-      const now = side === "BUY" ? p.bid : p.offer;
-      const stop = p.stop_level;
-      const el = document.createElement("div");
-      el.className = "pos";
-      el.innerHTML = `
-        <span class="epic">${esc(p.epic || "?")}</span>
-        <span class="side ${side === "BUY" ? "buy" : "sell"}">${esc(side || "?")}</span>
-        <span class="nums">size <b>${esc(p.volume ?? "?")}</b> · entry <b>${priceFmt(p.level)}</b>
-          ${now ? ` · now <b>${priceFmt(now)}</b>` : ""}
-          ${stop ? ` · stop <b>${priceFmt(stop)}</b>` : ""}</span>
-        <span class="upl ${upl === null ? "" : (upl >= 0 ? "up" : "down")}">${upl === null ? "—" : (upl > 0 ? "+" : "") + money(upl)}</span>`;
-      box.appendChild(el);
-    }
-  }
-
-  function renderGate() {
-    // Real data only: research verdicts, the desk's last stated reasons, agent risk overlays.
-    const box = $("gate");
+  // =============================================================== strategy wall / approvals
+  function renderWall() {
     const st = (state.status && state.status.strategy) || {};
-    const gate = st.gate || {};
-    const verdicts = gate.verdicts || {};
-    const reasons = (st.desk && st.desk.reasons) || {};
-    const overlays = st.overlays || [];
-    const created = gate.created ? new Date(gate.created * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "—";
-    $("gate-hint").textContent = `verdicts ${created} · trials ${gate.trials ?? "—"}`;
-    const epics = Array.from(new Set([...Object.keys(verdicts), ...Object.keys(reasons)]));
-    if (!epics.length && !(st.desk && st.desk.error)) {
-      box.innerHTML = '<div class="empty">no research verdicts yet — the lab runs automatically once the broker is connected</div>';
-      return;
-    }
-    let html = "";
-    if (st.desk && st.desk.error) html += `<div class="pos"><span class="epic">DESK</span><span class="nums">${esc(st.desk.error)}</span></div>`;
-    for (const e of epics) {
+    const gate = st.gate || {}, verdicts = gate.verdicts || {}, reasons = (st.desk && st.desk.reasons) || {};
+    const stopped = st.stopped || [], overlays = st.overlays || [];
+    const epics = Array.from(new Set([...Object.keys(verdicts), ...Object.keys(reasons), ...((state.status && state.status.trading && state.status.trading.epics) || [])]));
+    const created = gate.created ? fmtAge((Date.now() / 1000 - gate.created)) : "—";
+    $("wall-hint").textContent = `Urteile vor ${created} · Versuche (Trial-Counter) ${gate.trials ?? "—"}`;
+    if (!epics.length) { $("wall").innerHTML = '<tbody><tr><td class="empty">noch keine Forschungsurteile — das Labor startet automatisch</td></tr></tbody>'; return; }
+    const head = "<thead><tr><th>MARKT</th><th>STIL</th><th>STRATEGIE</th><th>URTEIL</th><th>OOS n</th><th>E (R)</th><th>HANDELBAR</th><th>DESK JETZT</th></tr></thead>";
+    const rows = epics.map((e) => {
       const v = verdicts[e] || {};
-      const lane = v.verdict || "—";
-      const strat = v.strategy ? ` · ${esc(v.strategy)}` : "";
-      const explore = v.explore ? ` · explore ${esc(v.explore)}` : "";
-      const n = v.oos_trades != null ? ` · OOS n=${esc(v.oos_trades)}, E=${Number(v.oos_expectancy_r).toFixed(2)} R` : "";
-      html += `<div class="pos"><span class="epic">${esc(e)}</span><span class="side ${lane === "PASS" ? "buy" : "sell"}">${esc(lane)}</span>
-        <span class="nums">${strat}${explore}${n}<br>${esc(reasons[e] || "")}</span></div>`;
-    }
-    for (const h of (state.hiring || []).filter((x) => x.status === "PENDING")) {
-      html += `<div class="pos"><span class="epic">HIRE</span><span class="side buy">ASK</span>
-        <span class="nums"><b>${esc(h.role)}</b> · ${esc(h.justification)} · ${esc(h.token_budget)} tokens/day<br>
-        <button class="mini" data-hire="${esc(h.request_id)}" data-decision="APPROVED">APPROVE</button>
-        <button class="mini" data-hire="${esc(h.request_id)}" data-decision="REJECTED">REJECT</button></span></div>`;
-    }
-    for (const o of overlays) {
-      html += `<div class="pos"><span class="epic">${esc(o.epic)}</span><span class="side sell">x${Number(o.factor).toFixed(2)}</span>
-        <span class="nums">${esc(o.agent_id)}: ${esc(o.reason)}</span></div>`;
-    }
-    box.innerHTML = html;
-    box.querySelectorAll("button[data-hire]").forEach((b) => b.addEventListener("click", async () => {
-      if (!confirm(`${b.dataset.decision} hiring request?`)) return;
+      const res = v.resolution || "";
+      const style = res ? (res.startsWith("MINUTE") ? "Daytrading " + res.replace("MINUTE_", "") + "m" : "Swing " + res.toLowerCase()) : "—";
+      const lane = v.verdict || "NONE";
+      const stop = stopped.find((x) => x.epic === e);
+      const ov = overlays.filter((o) => o.epic === e || o.epic === "*").map((o) => `x${Number(o.factor).toFixed(2)} ${esc(o.agent_id)}`).join(", ");
+      const feas = v.size_feasible === false ? `<span class="down" title="${esc(v.size_reason || "")}">nein</span>` : v.strategy ? '<span class="up">ja</span>' : "—";
+      return `<tr><td><b>${esc(e)}</b></td><td>${esc(style)}</td><td>${esc(v.strategy || "—")}${v.explore ? `<br><span class="muted">explore: ${esc(v.explore)}</span>` : ""}</td>
+        <td><span class="lane ${esc(lane)}">${esc(lane)}</span>${stop ? '<br><span class="down">KILL-KRITERIUM</span>' : ""}</td>
+        <td>${v.oos_trades ?? "—"}</td><td class="${v.oos_expectancy_r > 0 ? "up" : v.oos_expectancy_r < 0 ? "down" : ""}">${v.oos_expectancy_r == null ? "—" : Number(v.oos_expectancy_r).toFixed(2)}</td>
+        <td>${feas}</td><td class="muted">${esc(short(reasons[e] || "", 90))}${ov ? `<br><span style="color:var(--amber)">Overlay ${ov}</span>` : ""}</td></tr>`;
+    }).join("");
+    $("wall").innerHTML = head + "<tbody>" + rows + "</tbody>";
+  }
+  function diffHtml(diff) {
+    return esc(diff || "").split("\n").map((l) => l.startsWith("+") && !l.startsWith("+++") ? `<span class="add">${l}</span>` : l.startsWith("-") && !l.startsWith("---") ? `<span class="del">${l}</span>` : l).join("\n");
+  }
+  function ladderHtml() {
+    const pr = state.status && state.status.promotion;
+    if (!pr) return '<div class="approval"><b>Skalierungs-Leiter</b><br><span class="muted">noch keine Prüfung (täglich, im Handelsprozess)</span></div>';
+    return `<div class="approval"><b>Skalierungs-Leiter ${esc(pr.stage)} → ${esc(pr.next)}</b> · ${pr.passed}/${pr.total} Kriterien
+      ${pr.ready ? '<span class="up"> · bereit, Entscheidung liegt bei dir (approve-live)</span>' : ""}
+      ${pr.criteria.map((c) => `<div class="${c.ok ? "up" : "muted"}">${c.ok ? "✔" : "○"} ${esc(c.name)} <span class="muted">· ${esc(short(c.detail, 140))}</span></div>`).join("")}
+      <div class="muted" style="font-size:10px">${esc(pr.note || "")}</div></div>`;
+  }
+  function renderApprovals() {
+    const hires = (state.hiring || []).filter((h) => h.status === "PENDING");
+    const pbs = (state.playbooks && state.playbooks.pending) || [];
+    if (!hires.length && !pbs.length) { $("approvals").innerHTML = ladderHtml() + '<div class="empty">keine offenen Freigaben</div>'; return; }
+    $("approvals").innerHTML = ladderHtml() +
+      hires.map((h) => `<div class="approval"><b>Einstellung: ${esc(h.role)}</b> · ${esc(h.token_budget)} Tokens/Tag<br>
+        <span class="muted">${esc(h.justification)}</span><br>
+        <button class="mini ok" data-hire="${esc(h.request_id)}" data-d="APPROVED">GENEHMIGEN</button>
+        <button class="mini no" data-hire="${esc(h.request_id)}" data-d="REJECTED">ABLEHNEN</button></div>`).join("") +
+      pbs.map((p) => `<div class="approval"><b>Playbook ${esc(p.role)}</b> · vorgeschlagen von ${esc(p.proposed_by)}<br>
+        <span class="muted">${esc(p.reason)}</span><pre class="diff">${diffHtml(p.diff)}</pre>
+        <button class="mini ok" data-pb="${esc(p.id)}" data-d="APPROVED">ÜBERNEHMEN</button>
+        <button class="mini no" data-pb="${esc(p.id)}" data-d="REJECTED">VERWERFEN</button></div>`).join("");
+    $("approvals").querySelectorAll("button").forEach((b) => b.addEventListener("click", async () => {
+      const label = b.dataset.hire ? "Einstellung" : "Playbook-Änderung";
+      if (!confirm(`${label}: ${b.dataset.d === "APPROVED" ? "freigeben" : "ablehnen"}?`)) return;
       try {
-        const res = await fetch(`/api/hire/${encodeURIComponent(b.dataset.hire)}`, {
-          method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
-          body: JSON.stringify({ decision: b.dataset.decision }) });
-        toast(res.ok ? `Hiring ${b.dataset.decision.toLowerCase()}` : `Hiring failed (${res.status})`);
-        state.hiring = (await api("/api/hiring")).requests;
-        renderGate();
-      } catch (e) { toast(String(e)); }
+        if (b.dataset.hire) await post(`/api/hire/${encodeURIComponent(b.dataset.hire)}`, { decision: b.dataset.d });
+        else await post(`/api/playbooks/${encodeURIComponent(b.dataset.pb)}`, { decision: b.dataset.d });
+        toast(`${label} ${b.dataset.d === "APPROVED" ? "freigegeben" : "abgelehnt"}`);
+      } catch (e) { toast("Fehler: " + e.message); }
+      refreshApprovals();
     }));
   }
 
-  function renderLessons() {
-    const box = $("lessons");
-    const list = state.lessons.slice(0, 10);
-    if (!list.length) {
-      box.innerHTML = '<div class="empty">no lessons yet — agents learn after their first tasks</div>';
-      return;
-    }
-    box.innerHTML = "";
-    for (const l of list) {
-      const el = document.createElement("div");
-      el.className = "lesson";
-      const conf = Number(l.confidence ?? 0).toFixed(2);
-      el.innerHTML = `
-        <div class="lh">
-          <span class="dot" style="background:${colorFor(l.agent_id)}"></span>
-          <b>${esc(l.agent_id)}</b>
-          <span class="conf">conf ${conf} · used ${esc(l.applied_count ?? 0)}×</span>
-        </div>
-        <div class="lt">${esc(l.lesson)}</div>`;
-      box.appendChild(el);
-    }
-  }
-
-  function renderArchive() {
-    const data = state.archive || {};
-    const stats = data.stats || {};
-    const trades = (data.trades || []).slice().reverse();
-    const box = $("ledger");
-    const root = stats.root || "archiv";
-    $("archive-path").textContent = `${root.replace(/\\/g, "/")}/trades`;
-    $("archive-hint").textContent = data.available === false ? "archive offline" : "filing cabinet";
-
-    const closed = trades.filter((t) => t.status === "closed");
-    const realized = Number(stats.realized_profit);
-    const reported = Number(stats.trades_with_profit ?? 0);
-    // A closed trade without a broker-confirmed profit is not a 0.00 result.
-    const realizedTxt = reported > 0 && isFinite(realized)
-      ? `${realized > 0 ? "+" : ""}${money(realized)} CHF`
-      : "—";
-    const kb = stats.size_bytes ? (stats.size_bytes / 1024).toFixed(1) + " KiB" : "—";
-    $("archive-stats").innerHTML =
-      `<b>${stats.trades_total ?? trades.length}</b> fills · ` +
-      `<b>${stats.trades_closed ?? closed.length}</b> closed · ` +
-      `realized <b>${realizedTxt}</b> · ${esc(kb)} · ` +
-      `<b>${stats.compressed_files ?? 0}</b> compressed`;
-
-    const head = '<div class="ledger-row ledger-head">' +
-      "<span>time</span><span>market</span><span>side</span><span>size</span>" +
-      "<span>entry</span><span>exit</span><span>P/L</span><span>status</span></div>";
-
-    if (!trades.length) {
-      box.innerHTML = head + '<div class="empty" style="padding:10px 12px">' +
-        (data.available === false
-          ? "archive not available in this process"
-          : "no trades archived yet — the desk files every signal and fill here") +
-        "</div>";
-      return;
-    }
-
-    const rows = trades.map((t) => {
-      const side = String(t.side || "").toUpperCase();
-      const pnl = (t.profit === null || t.profit === undefined) ? null : Number(t.profit);
-      const pnlTxt = pnl === null || !isFinite(pnl)
-        ? "—"
-        : `${pnl > 0 ? "+" : ""}${money(pnl)} ${t.profit_currency || ""}`.trim();
-      const pnlCls = pnl === null ? "dim" : (pnl >= 0 ? "up" : "down");
-      const status = t.status === "closed" ? "closed" : "open";
-      return '<div class="ledger-row" title="deal ' + esc(t.deal_id || "?") +
-        (t.close_reason ? " · " + esc(t.close_reason) : "") + '">' +
-        `<span class="num dim">${esc(fmtTime(t.time))}</span>` +
-        `<span class="epic">${esc(t.epic || "?")}</span>` +
-        `<span class="side ${side === "BUY" ? "buy" : "sell"}">${esc(side || "?")}</span>` +
-        `<span class="num">${esc(t.size ?? "—")}</span>` +
-        `<span class="num">${priceFmt(t.entry)}</span>` +
-        `<span class="num">${t.exit === null || t.exit === undefined ? "—" : priceFmt(t.exit)}</span>` +
-        `<span class="pnl ${pnlCls}">${esc(pnlTxt)}</span>` +
-        `<span class="st ${status}">${status}</span>` +
-        "</div>";
+  // =============================================================== panels
+  function renderPositions() {
+    const list = (state.status && state.status.positions) || [];
+    $("pos-hint").textContent = list.length ? `${list.length} offen` : "flach";
+    if (!list.length) { $("positions").innerHTML = '<div class="empty">keine offenen Positionen</div>'; return; }
+    $("positions").innerHTML = list.map((p) => {
+      const side = String(p.direction || "").toUpperCase(), upl = p.upl == null ? null : Number(p.upl);
+      return `<div class="pos"><b>${esc(p.epic)}</b><span class="side ${side === "BUY" ? "buy" : "sell"}">${esc(side)}</span>
+        <span class="muted">${esc(p.volume)} @ ${priceFmt(p.level)}${p.stop_level ? " · Stop " + priceFmt(p.stop_level) : ' · <span class="down">ohne Stop!</span>'}</span>
+        <span class="${upl === null ? "" : upl >= 0 ? "up" : "down"}">${upl === null ? "—" : (upl > 0 ? "+" : "") + money(upl)}</span></div>`;
     }).join("");
-
-    box.innerHTML = head + rows;
   }
-
-  const fmtTime = (ts) => {
-    const s = String(ts || "");
-    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-    return m ? `${m[3]}.${m[2]} ${m[4]}:${m[5]}` : (s.slice(0, 16) || "—");
-  };
-
-  function selectAgent(name) {
-    state.selected = name;
-    renderRoster();
-    renderInspector();
+  function renderTasks() {
+    const cols = { PENDING: [], RUNNING: [], DONE: [], FAILED: [] };
+    for (const t of state.tasks) (cols[t.status] || cols.PENDING).push(t);
+    $("task-hint").textContent = `${cols.RUNNING.length} laufen · ${cols.PENDING.length} warten`;
+    const names = { PENDING: "WARTET", RUNNING: "LÄUFT", DONE: "FERTIG", FAILED: "FEHLER" };
+    $("tasks").innerHTML = Object.entries(cols).map(([k, v]) => `<div class="col"><h4>${names[k]}<b>${v.length}</b></h4>` +
+      v.slice(0, 5).map((t) => `<div class="card" title="${esc(t.description)}"><b>${esc(t.assigned_to)}</b><br>${esc(short(t.title, 40))}</div>`).join("") + "</div>").join("");
   }
-
-  function renderInspector() {
-    const a = state.agents.find((x) => x.name === state.selected);
-    if (!a) {
-      $("i-name").textContent = "—";
-      $("i-meta").innerHTML = "";
-      $("i-act").textContent = "Click a robot or a staff card to see what that agent is doing.";
-      $("inspector-hint").textContent = "select an agent";
-      return;
-    }
-    const last = state.lastEventByAgent[a.name];
-    $("i-name").textContent = a.name;
-    $("i-meta").innerHTML = `
-      <span>role <b>${esc(a.role || "—")}</b></span>
-      <span>model <b>${esc(a.model || "default")}</b></span>
-      <span>reports to <b>${esc(a.reporting_line || "—")}</b></span>
-      <span>lessons <b>${esc(a.lessons_learned ?? 0)}</b></span>
-      ${a.metrics_7d ? `<span>7d tasks <b>${esc(a.metrics_7d.tasks)}</b></span>
-      <span>valid <b>${a.metrics_7d.valid_rate == null ? "—" : Math.round(a.metrics_7d.valid_rate * 100) + "%"}</b></span>
-      <span>rejected <b>${esc(a.metrics_7d.invalid)}</b></span>
-      <span>actions <b>${esc(a.metrics_7d.actions)}</b></span>
-      <span>tokens <b>${esc(a.metrics_7d.tokens)}</b></span>` : ""}`;
-    $("i-act").textContent = last
-      ? `${last.type}: ${eventText(last)}`
-      : "No activity recorded yet in this session.";
-    $("inspector-hint").textContent = "live";
+  function renderLessons() {
+    const list = state.lessons || [];
+    $("lesson-hint").textContent = `${list.length} Lektionen · ${list.filter((l) => l.contradicts).length} umstritten`;
+    if (!list.length) { $("lessons").innerHTML = '<div class="empty">noch keine Lektionen</div>'; return; }
+    $("lessons").innerHTML = list.slice(0, 30).map((l) => lessonRow(l, true)).join("");
+    bindLessonDelete($("lessons"));
   }
-
-  // ============================================================ OFFICE FLOOR
-  const canvas = $("office");
-  const ctx = canvas.getContext("2d");
-  let W = 0, H = 0;
-  let desks = [];
-  let hover = null;
-  let bgCache = null;
-  let layoutKey = "";
-  let pointer = { x: 0.5, y: 0.5 };
-  let parX = 0, parY = 0;
-
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const lerp = (a, b, t) => a + (b - a) * t;
-
-  function refreshFloor() {
-    layoutKey = "";
-    syncCanvasHeight();
-    layoutFloor();
-    draw();
+  function lessonRow(l, withAgent) {
+    return `<div class="lesson"><div class="txt">${l.contradicts ? '<span class="disputed">UMSTRITTEN</span> ' : ""}${esc(l.lesson)}
+      <div class="meta">${withAgent ? esc(l.agent_id) + " · " : ""}Vertrauen ${Number(l.confidence).toFixed(2)} · ${l.applied_count}× genutzt · Beleg ${esc(String(l.evidence_task_id || "—").slice(0, 8))}</div></div>
+      <button class="mini no" data-del="${esc(l.lesson_id)}" aria-label="Lektion löschen">✕</button></div>`;
   }
-
-  function roundRect(c, x, y, w, h, r) {
-    const rr = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
-    c.beginPath();
-    c.moveTo(x + rr, y);
-    c.arcTo(x + w, y, x + w, y + h, rr);
-    c.arcTo(x + w, y + h, x, y + h, rr);
-    c.arcTo(x, y + h, x, y, rr);
-    c.arcTo(x, y, x + w, y, rr);
-    c.closePath();
+  function bindLessonDelete(root) {
+    root.querySelectorAll("button[data-del]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm("Diese Lektion löschen?")) return;
+      try { await api(`/api/lessons/${encodeURIComponent(b.dataset.del)}`, { method: "DELETE" }); toast("Lektion gelöscht"); } catch (e) { toast("Fehler: " + e.message); }
+      refreshLessons();
+    }));
   }
-
-  function hexA(hex, a) {
-    const h = hex.replace("#", "");
-    const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
-    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
-  }
-
-  function resizeCanvas() {
-    const rect = canvas.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    W = Math.max(1, rect.width);
-    H = Math.max(1, rect.height);
-    canvas.width = Math.floor(W * dpr);
-    canvas.height = Math.floor(H * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    bgCache = null;
-    layoutFloor();
-    draw();
-  }
-
-  function syncCanvasHeight() {
-    const n = Math.max(state.agents.length, 1);
-    const cols = n <= 4 ? n : Math.ceil(n / 2);
-    const rows = Math.ceil(n / cols);
-    const h = clamp(Math.round(window.innerWidth * 0.40), rows > 1 ? 400 : 310, 440);
-    const next = h + "px";
-    if (canvas.style.height !== next) canvas.style.height = next;
-  }
-
-  function layoutFloor() {
-    const n = Math.max(state.agents.length, 1);
-    const cols = n <= 4 ? n : Math.ceil(n / 2);
-    const rows = Math.ceil(n / cols);
-    const agents = state.agents;
-
-    const key = `${n}|${W}|${H}|${agents.map((a) => a.name).join(",")}`;
-    if (key === layoutKey) return;
-    layoutKey = key;
-    bgCache = null;
-
-    const margin = Math.min(46, W * 0.05);
-    const usable = W - margin * 2;
-    const deskW = Math.min(240, (usable / cols) * 0.82);
-    const rowGap = rows > 1 ? H * 0.195 : 0;
-    const baseY = rows > 1 ? H * 0.615 : H * 0.70;
-
-    desks = agents.map((a, i) => {
-      const row = Math.floor(i / cols);
-      const col = i % cols;
-      const inRow = row === 0 ? Math.min(cols, n) : n - cols;
-      const rowWidth = inRow * (usable / cols);
-      const startX = W / 2 - rowWidth / 2 + (usable / cols) / 2;
-      return {
-        name: a.name,
-        role: a.role,
-        color: colorFor(a.name),
-        x: startX + col * (usable / cols),
-        y: baseY + row * rowGap,
-        w: deskW * (row === 0 && rows > 1 ? 0.84 : 1),
-        row,
-        seed: (a.name.charCodeAt(0) + a.name.length * 7) % 100,
-      };
-    });
-  }
-
-  // ------------------------------------------------------------ background
-  const PAD = 26;
-
-  function buildBackground() {
-    const off = document.createElement("canvas");
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    off.width = Math.floor((W + PAD * 2) * dpr);
-    off.height = Math.floor((H + PAD * 2) * dpr);
-    const c = off.getContext("2d");
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.translate(PAD, PAD);
-
-    const horizon = H * 0.62;
-    const backL = W * 0.085;
-    const backR = W * 0.915;
-    const backT = H * 0.13;
-    const vpX = W / 2;
-    const vpY = horizon * 0.62;
-
-    c.fillStyle = "#04070b";
-    c.fillRect(-PAD, -PAD, W + PAD * 2, H + PAD * 2);
-
-    // ---- ceiling: a receding plane above the back wall
-    const ceil = c.createLinearGradient(0, 0, 0, backT);
-    ceil.addColorStop(0, "#070d14");
-    ceil.addColorStop(1, "#0a131c");
-    c.fillStyle = ceil;
-    c.beginPath();
-    c.moveTo(-PAD, -PAD);
-    c.lineTo(W + PAD, -PAD);
-    c.lineTo(backR, backT);
-    c.lineTo(backL, backT);
-    c.closePath();
-    c.fill();
-
-    // recessed ceiling light strips, receding to the back wall
-    for (let i = 0; i < 4; i++) {
-      const fx = W * (0.24 + i * 0.175);
-      const bx = vpX + (fx - vpX) * 0.42;
-      const halfF = W * 0.026;
-      const halfB = halfF * 0.42;
-      const lg = c.createLinearGradient(0, -PAD, 0, backT);
-      lg.addColorStop(0, "rgba(150,205,255,0.16)");
-      lg.addColorStop(1, "rgba(150,205,255,0.03)");
-      c.fillStyle = lg;
-      c.beginPath();
-      c.moveTo(fx - halfF, -PAD);
-      c.lineTo(fx + halfF, -PAD);
-      c.lineTo(bx + halfB, backT - 2);
-      c.lineTo(bx - halfB, backT - 2);
-      c.closePath();
-      c.fill();
-      // fixture
-      c.fillStyle = "rgba(196,228,255,0.22)";
-      c.fillRect(bx - halfB, backT - 6, halfB * 2, 3);
-    }
-
-    // ---- side walls (left and right), converging to the back wall
-    const leftWall = c.createLinearGradient(0, 0, backL, horizon);
-    leftWall.addColorStop(0, "#05090e");
-    leftWall.addColorStop(0.55, "#08101a");
-    leftWall.addColorStop(1, "#0a141e");
-    c.fillStyle = leftWall;
-    c.beginPath();
-    c.moveTo(-PAD, -PAD);
-    c.lineTo(backL, backT);
-    c.lineTo(backL, horizon);
-    c.lineTo(-PAD, H * 1.06);
-    c.closePath();
-    c.fill();
-
-    const rightWall = c.createLinearGradient(W, 0, backR, horizon);
-    rightWall.addColorStop(0, "#05090e");
-    rightWall.addColorStop(0.55, "#08101a");
-    rightWall.addColorStop(1, "#0a141e");
-    c.fillStyle = rightWall;
-    c.beginPath();
-    c.moveTo(W + PAD, -PAD);
-    c.lineTo(backR, backT);
-    c.lineTo(backR, horizon);
-    c.lineTo(W + PAD, H * 1.06);
-    c.closePath();
-    c.fill();
-
-    // wall panel seams, all pointing at the vanishing point
-    c.strokeStyle = "rgba(90,130,170,0.06)";
-    c.lineWidth = 1;
-    for (let i = 1; i <= 5; i++) {
-      const t = i / 6;
-      c.beginPath();
-      c.moveTo(backL, backT + (horizon - backT) * t);
-      c.lineTo(-PAD, vpY + (horizon * 1.06 - vpY) * t * 1.35);
-      c.stroke();
-      c.beginPath();
-      c.moveTo(backR, backT + (horizon - backT) * t);
-      c.lineTo(W + PAD, vpY + (horizon * 1.06 - vpY) * t * 1.35);
-      c.stroke();
-    }
-
-    // ---- back wall
-    const wall = c.createLinearGradient(0, backT, 0, horizon);
-    wall.addColorStop(0, "#101d2a");
-    wall.addColorStop(0.55, "#0c1723");
-    wall.addColorStop(1, "#080f17");
-    c.fillStyle = wall;
-    c.fillRect(backL, backT, backR - backL, horizon - backT);
-
-    // back wall seams
-    c.strokeStyle = "rgba(90,130,170,0.05)";
-    for (let x = backL; x < backR; x += 62) {
-      c.beginPath(); c.moveTo(x, backT); c.lineTo(x, horizon); c.stroke();
-    }
-    c.strokeStyle = "rgba(90,130,170,0.08)";
-    c.beginPath(); c.moveTo(backL, horizon - 44); c.lineTo(backR, horizon - 44); c.stroke();
-
-    // corner shading where the walls meet
-    const cl = c.createLinearGradient(backL, 0, backL + 46, 0);
-    cl.addColorStop(0, "rgba(0,0,0,0.55)");
-    cl.addColorStop(1, "rgba(0,0,0,0)");
-    c.fillStyle = cl;
-    c.fillRect(backL, backT, 46, horizon - backT);
-    const cr = c.createLinearGradient(backR, 0, backR - 46, 0);
-    cr.addColorStop(0, "rgba(0,0,0,0.55)");
-    cr.addColorStop(1, "rgba(0,0,0,0)");
-    c.fillStyle = cr;
-    c.fillRect(backR - 46, backT, 46, horizon - backT);
-
-    // ---- windows on the back wall
-    const winCount = W > 760 ? 3 : 2;
-    const winW = Math.min(190, ((backR - backL) * 0.74) / winCount);
-    const winH = Math.min((horizon - backT) * 0.62, 170);
-    const gap = 24;
-    const totalW = winCount * winW + (winCount - 1) * gap;
-    const startX = vpX - totalW / 2;
-    const winY = backT + (horizon - backT) * 0.17;
-
-    // ambient light spilling out of the windows into the room
-    const amb = c.createRadialGradient(vpX, winY + winH * 0.5, 10, vpX, winY + winH * 0.5, W * 0.55);
-    amb.addColorStop(0, "rgba(96,156,214,0.13)");
-    amb.addColorStop(1, "rgba(96,156,214,0)");
-    c.fillStyle = amb;
-    c.fillRect(backL, backT, backR - backL, horizon - backT);
-
-    for (let i = 0; i < winCount; i++) {
-      drawWindow(c, startX + i * (winW + gap), winY, winW, winH, i);
-    }
-
-    // ---- floor
-    const floor = c.createLinearGradient(0, horizon, 0, H);
-    floor.addColorStop(0, "#0c1620");
-    floor.addColorStop(0.35, "#0a1119");
-    floor.addColorStop(1, "#04070b");
-    c.fillStyle = floor;
-    c.fillRect(-PAD, horizon, W + PAD * 2, H - horizon + PAD);
-
-    // glossy strip just under the wall (wet-floor reflection)
-    const gloss = c.createLinearGradient(0, horizon, 0, horizon + 90);
-    gloss.addColorStop(0, "rgba(90,160,220,0.13)");
-    gloss.addColorStop(0.45, "rgba(70,130,190,0.05)");
-    gloss.addColorStop(1, "rgba(70,130,190,0)");
-    c.fillStyle = gloss;
-    c.fillRect(-PAD, horizon, W + PAD * 2, 90);
-
-    // floor perspective grid
-    c.strokeStyle = "rgba(56,189,248,0.07)";
-    c.lineWidth = 1;
-    for (let i = -14; i <= 14; i++) {
-      c.beginPath();
-      c.moveTo(vpX + i * 12, horizon);
-      c.lineTo(vpX + i * 92, H + 20);
-      c.stroke();
-    }
-    for (let i = 1; i <= 7; i++) {
-      const t = i / 7;
-      const y = horizon + Math.pow(t, 2.1) * (H - horizon) * 1.15;
-      c.globalAlpha = 0.5 + t * 0.5;
-      c.beginPath(); c.moveTo(-PAD, y); c.lineTo(W + PAD, y); c.stroke();
-    }
-    c.globalAlpha = 1;
-
-    // wall/floor shadow line
-    const shadow = c.createLinearGradient(0, horizon - 18, 0, horizon + 26);
-    shadow.addColorStop(0, "rgba(0,0,0,0)");
-    shadow.addColorStop(0.6, "rgba(0,0,0,0.55)");
-    shadow.addColorStop(1, "rgba(0,0,0,0)");
-    c.fillStyle = shadow;
-    c.fillRect(backL, horizon - 18, backR - backL, 44);
-
-    // baseboard LED strip along the back wall
-    const strip = c.createLinearGradient(backL, 0, backR, 0);
-    strip.addColorStop(0, "rgba(56,189,248,0)");
-    strip.addColorStop(0.5, "rgba(56,189,248,0.55)");
-    strip.addColorStop(1, "rgba(56,189,248,0)");
-    c.fillStyle = strip;
-    c.fillRect(backL, horizon - 3, backR - backL, 2);
-    c.shadowColor = "rgba(56,189,248,0.7)";
-    c.shadowBlur = 12;
-    c.fillRect(backL, horizon - 3, backR - backL, 2);
-    c.shadowBlur = 0;
-
-    // corner decor: server rack left, plants right
-    drawServerRack(c, backL + 10, horizon - 96);
-    drawPlant(c, backR - 26, horizon - 4);
-    drawPlant(c, 26, horizon + 30);
-
-    // vignette
-    const vg = c.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.35, W / 2, H * 0.5, Math.max(W, H) * 0.75);
-    vg.addColorStop(0, "rgba(0,0,0,0)");
-    vg.addColorStop(1, "rgba(0,0,0,0.62)");
-    c.fillStyle = vg;
-    c.fillRect(-PAD, -PAD, W + PAD * 2, H + PAD * 2);
-
-    return off;
-  }
-
-  function drawWindow(c, x, y, w, h, seed) {
-    // frame
-    c.fillStyle = "#0c141d";
-    roundRect(c, x - 6, y - 6, w + 12, h + 12, 6); c.fill();
-    c.strokeStyle = "#1a2735"; c.lineWidth = 1;
-    roundRect(c, x - 6, y - 6, w + 12, h + 12, 6); c.stroke();
-
-    // glass
-    const glass = c.createLinearGradient(x, y, x, y + h);
-    glass.addColorStop(0, "#123a5c");
-    glass.addColorStop(0.55, "#0c2238");
-    glass.addColorStop(1, "#071019");
-    c.fillStyle = glass;
-    c.fillRect(x, y, w, h);
-
-    // skyline
-    const baseY = y + h;
-    let px = x;
-    let i = 0;
-    while (px < x + w) {
-      const bw = 10 + ((seed * 13 + i * 29) % 26);
-      const bh = 18 + ((seed * 31 + i * 47) % Math.floor(h * 0.55));
-      c.fillStyle = "#050a11";
-      c.fillRect(px, baseY - bh, Math.min(bw, x + w - px), bh);
-
-      // lit windows
-      c.fillStyle = "rgba(251,191,36,0.42)";
-      for (let wy = baseY - bh + 5; wy < baseY - 4; wy += 7) {
-        for (let wx = px + 3; wx < px + Math.min(bw, x + w - px) - 3; wx += 6) {
-          if (((wx + wy + seed * 17) | 0) % 5 === 0) c.fillRect(wx, wy, 2, 3);
-        }
-      }
-      px += Math.min(bw, x + w - px) + 4;
-      i++;
-    }
-
-    // moon glow
-    const moonX = x + w * (0.68 + seed * 0.06);
-    const moonY = y + h * 0.22;
-    const mg = c.createRadialGradient(moonX, moonY, 1, moonX, moonY, 42);
-    mg.addColorStop(0, "rgba(219,234,254,0.55)");
-    mg.addColorStop(1, "rgba(219,234,254,0)");
-    c.fillStyle = mg;
-    c.beginPath(); c.arc(moonX, moonY, 42, 0, Math.PI * 2); c.fill();
-    c.fillStyle = "rgba(226,240,255,0.75)";
-    c.beginPath(); c.arc(moonX, moonY, 6, 0, Math.PI * 2); c.fill();
-
-    // mullion
-    c.fillStyle = "#0b131c";
-    c.fillRect(x + w / 2 - 2, y, 4, h);
-
-    // glass reflection
-    c.save();
-    c.beginPath(); c.rect(x, y, w, h); c.clip();
-    const refl = c.createLinearGradient(x, y, x + w, y + h);
-    refl.addColorStop(0, "rgba(180,220,255,0.07)");
-    refl.addColorStop(0.35, "rgba(180,220,255,0.01)");
-    refl.addColorStop(1, "rgba(180,220,255,0.05)");
-    c.fillStyle = refl;
-    c.fillRect(x, y, w, h);
-    c.restore();
-  }
-
-  function drawServerRack(c, x, y) {
-    const w = 44, h = 92;
-    c.fillStyle = "#0a1017";
-    roundRect(c, x, y, w, h, 4); c.fill();
-    c.strokeStyle = "#1c2a3a"; c.lineWidth = 1;
-    roundRect(c, x, y, w, h, 4); c.stroke();
-    for (let i = 0; i < 9; i++) {
-      const ly = y + 8 + i * 9;
-      c.fillStyle = "#0e1721";
-      c.fillRect(x + 5, ly, w - 10, 6);
-      const on = (i * 7 + 3) % 4 !== 0;
-      c.fillStyle = on ? "rgba(52,211,153,0.85)" : "rgba(56,189,248,0.5)";
-      c.fillRect(x + w - 11, ly + 2, 2.5, 2.5);
+  function eventText(e) {
+    const p = parse(e.payload_json);
+    switch (e.type) {
+      case "THOUGHT": return p.content;
+      case "RESULT": return `${p.status || ""} ${p.tokens ? "· " + p.tokens + " Tokens" : ""} ${short(p.deliverable, 120)}`;
+      case "TOOL_CALL": return `${p.tool} ${JSON.stringify(p.args || {})} → ${p.ok ? "ok" : "Fehler"}`;
+      case "ACTION": return `${(p.action || {}).type}: ${short((p.action || {}).reason || (p.action || {}).message || "", 100)} → ${(p.outcome || {}).status}`;
+      case "ACTION_REJECTED": case "AGENT_INVALID": return p.reason;
+      case "LEARNED": return (p.lessons || []).join(" | ");
+      case "TASK_CREATED": return `→ ${p.assigned_to}: ${p.title}`;
+      case "TASK_STARTED": case "TASK_COMPLETED": return p.title || p.task_id;
+      case "SIGNAL": return `${p.side} ${p.size} ${p.epic} @ ${priceFmt(p.price)} · ${short(p.reason, 90)}`;
+      case "ORDER_FILLED": return `${p.side} ${p.size} ${p.epic} @ ${priceFmt(p.price)}${p.recovered ? " (wiederhergestellt)" : ""}`;
+      case "TRADE_REJECTED": return `${p.epic} ${p.side || ""}: ${p.reason}`;
+      case "TRADE_RESULT": return `${p.epic} ${p.strategy || ""}: ${money(p.pnl)} (${p.r == null ? "—" : Number(p.r).toFixed(2) + " R"})`;
+      case "DESK_STATUS": return p.error || Object.entries(p.reasons || {}).map(([k, v]) => `${k}: ${short(v, 50)}`).join(" · ");
+      case "RISK_TIGHTENED": return `${p.epic}: Risiko x${Number(p.factor).toFixed(2)} für ${Number(p.hours || 0).toFixed(1)} h · ${short(p.reason, 120)}`;
+      case "HIRING_REQUEST": return `Einstellung ${p.role} beantragt: ${short(p.justification, 120)}`;
+      case "PLAYBOOK_PROPOSED": return `Playbook ${p.role}: ${short(p.reason, 140)}`;
+      case "STRATEGY_STOPPED": case "STRATEGY_WARNING": return `${p.epic} ${p.strategy}: ${(p.reasons || []).join("; ")}`;
+      case "RESEARCH_DONE": return Object.entries(p.summary || {}).map(([k, v]) => `${k}: ${v}`).join(" · ");
+      default: return short(JSON.stringify(p), 220);
     }
   }
-
-  function drawPlant(c, x, y) {
-    // pot
-    c.fillStyle = "#13202c";
-    c.beginPath();
-    c.moveTo(x - 14, y - 18);
-    c.lineTo(x + 14, y - 18);
-    c.lineTo(x + 10, y);
-    c.lineTo(x - 10, y);
-    c.closePath(); c.fill();
-    c.strokeStyle = "#1d2d3d"; c.stroke();
-    // leaves
-    c.strokeStyle = "#1f7a5a";
-    c.lineWidth = 2;
-    for (let i = 0; i < 7; i++) {
-      const a = -Math.PI / 2 + (i - 3) * 0.32;
-      const len = 22 + (i % 3) * 8;
-      c.beginPath();
-      c.moveTo(x, y - 18);
-      c.quadraticCurveTo(x + Math.cos(a) * len * 0.6, y - 30 - Math.sin(a) * len * 0.5,
-                         x + Math.cos(a) * len, y - 34 - Math.sin(a) * len);
-      c.stroke();
-    }
+  function feedMatch(e) {
+    if (HIDDEN.includes(e.type)) return false;
+    if (state.filter === "trades") return TRADE_TYPES.includes(e.type);
+    if (state.filter === "alerts") return ALERT_TYPES.includes(e.type);
+    if (state.filter === "research") return RESEARCH_TYPES.includes(e.type);
+    if (state.filter === "agents") return !TRADE_TYPES.includes(e.type) && !["SYSTEM", "TRADING_DESK", "RECONCILER", "EXECUTION_GATEWAY", "PRICE_STREAM", "RESEARCH_LAB"].includes(e.agent_id);
+    return true;
+  }
+  function renderFeed() {
+    const list = state.events.filter(feedMatch).slice(-120).reverse();
+    $("feed").innerHTML = list.length ? list.map((e) => {
+      const c = TYPE_COLOR[e.type] || "#607588";
+      return `<div class="ev"><span class="muted">${esc(timeOf(e.ts))}</span><span class="who">${esc(e.agent_id || "")}</span>
+        <span><span class="tag" style="color:${c};border-color:${c}">${esc(e.type)}</span>${esc(short(eventText(e), 260))}</span></div>`;
+    }).join("") : '<div class="empty" style="padding:8px 12px">nichts in diesem Filter</div>';
   }
 
-  // ---------------------------------------------------------------- robots
-  function drawRobot(c, d, t, st) {
-    const s = d.w * 0.44;
-    const x = d.x;
-    const y = d.y;                 // desk surface line
-    const breathe = Math.sin(t / 1100 + d.seed) * s * 0.012;
-    const thinking = st === "THINKING";
-    const learned = st === "LEARNED";
-    const working = st === "RUNNING";
-    const accent = learned ? "#34d399" : (thinking ? "#fbbf24" : d.color);
-
-    // chair back
-    c.fillStyle = "#0a1119";
-    roundRect(c, x - s * 0.62, y - s * 1.62, s * 1.24, s * 1.42, s * 0.16);
-    c.fill();
-    c.strokeStyle = "#16202c";
-    c.lineWidth = 1;
-    c.stroke();
-
-    // shoulder glow / ambient light from monitor
-    const glow = c.createRadialGradient(x, y - s * 1.05, 2, x, y - s * 1.05, s * 1.15);
-    glow.addColorStop(0, hexA(accent, learned ? 0.28 : (thinking ? 0.18 : 0.10)));
-    glow.addColorStop(1, hexA(accent, 0));
-    c.fillStyle = glow;
-    c.beginPath(); c.arc(x, y - s * 1.05, s * 1.15, 0, Math.PI * 2); c.fill();
-
-    const torsoY = y - s * 0.98 + breathe;
-    const torsoW = s * 0.86;
-    const torsoH = s * 0.78;
-
-    // arms (behind torso, reaching the keyboard)
-    const typePhase = Math.sin(t / 120 + d.seed);
-    const leftHand = { x: x - s * 0.34, y: y - s * 0.16 + (working ? typePhase * s * 0.03 : 0) };
-    const rightHand = { x: x + s * 0.34, y: y - s * 0.16 - (working ? typePhase * s * 0.03 : 0) };
-
-    c.strokeStyle = "#25313f";
-    c.lineWidth = s * 0.17;
-    c.lineCap = "round";
-    c.beginPath();
-    c.moveTo(x - torsoW * 0.52, torsoY - torsoH * 0.28);
-    c.quadraticCurveTo(x - s * 0.62, torsoY + s * 0.1, leftHand.x, leftHand.y);
-    c.stroke();
-    c.beginPath();
-    c.moveTo(x + torsoW * 0.52, torsoY - torsoH * 0.28);
-    c.quadraticCurveTo(x + s * 0.62, torsoY + s * 0.1, rightHand.x, rightHand.y);
-    c.stroke();
-
-    // hands
-    c.fillStyle = "#2d3b4c";
-    c.beginPath(); c.arc(leftHand.x, leftHand.y, s * 0.075, 0, Math.PI * 2); c.fill();
-    c.beginPath(); c.arc(rightHand.x, rightHand.y, s * 0.075, 0, Math.PI * 2); c.fill();
-
-    // torso
-    const bodyGrad = c.createLinearGradient(0, torsoY - torsoH * 0.6, 0, torsoY + torsoH * 0.5);
-    bodyGrad.addColorStop(0, "#37485c");
-    bodyGrad.addColorStop(0.55, "#233040");
-    bodyGrad.addColorStop(1, "#131b25");
-    c.fillStyle = bodyGrad;
-    roundRect(c, x - torsoW / 2, torsoY - torsoH * 0.55, torsoW, torsoH, s * 0.18);
-    c.fill();
-    c.strokeStyle = hexA(d.color, 0.35);
-    c.lineWidth = 1;
-    c.stroke();
-
-    // chest plate + LED
-    c.fillStyle = "rgba(8,14,20,0.85)";
-    roundRect(c, x - torsoW * 0.26, torsoY - torsoH * 0.34, torsoW * 0.52, torsoH * 0.34, s * 0.06);
-    c.fill();
-    const ledPulse = 0.55 + 0.45 * Math.sin(t / (working ? 260 : 900) + d.seed);
-    c.fillStyle = hexA(accent, 0.35 + ledPulse * 0.55);
-    c.shadowColor = hexA(accent, 0.9);
-    c.shadowBlur = s * 0.16;
-    c.beginPath(); c.arc(x, torsoY - torsoH * 0.16, s * 0.052, 0, Math.PI * 2); c.fill();
-    c.shadowBlur = 0;
-
-    // neck
-    c.fillStyle = "#1b2532";
-    roundRect(c, x - s * 0.10, torsoY - torsoH * 0.66, s * 0.20, s * 0.16, s * 0.04);
-    c.fill();
-
-    // head
-    const headW = s * 0.78;
-    const headH = s * 0.60;
-    const headY = torsoY - torsoH * 0.62 - headH * 0.82 + (thinking ? Math.sin(t / 420) * s * 0.014 : 0);
-
-    const headGrad = c.createLinearGradient(0, headY, 0, headY + headH);
-    headGrad.addColorStop(0, "#41546a");
-    headGrad.addColorStop(0.5, "#2a3848");
-    headGrad.addColorStop(1, "#1a2431");
-    c.fillStyle = headGrad;
-    roundRect(c, x - headW / 2, headY, headW, headH, s * 0.15);
-    c.fill();
-    c.strokeStyle = "rgba(150,185,220,0.18)";
-    c.lineWidth = 1;
-    c.stroke();
-
-    // ear pods
-    c.fillStyle = hexA(d.color, 0.55);
-    roundRect(c, x - headW / 2 - s * 0.05, headY + headH * 0.32, s * 0.08, headH * 0.30, s * 0.03);
-    c.fill();
-    roundRect(c, x + headW / 2 - s * 0.03, headY + headH * 0.32, s * 0.08, headH * 0.30, s * 0.03);
-    c.fill();
-
-    // visor
-    const visorW = headW * 0.78;
-    const visorH = headH * 0.44;
-    const visorX = x - visorW / 2;
-    const visorY = headY + headH * 0.20;
-    const visorGrad = c.createLinearGradient(0, visorY, 0, visorY + visorH);
-    visorGrad.addColorStop(0, "#04080d");
-    visorGrad.addColorStop(1, "#0b1620");
-    c.fillStyle = visorGrad;
-    roundRect(c, visorX, visorY, visorW, visorH, s * 0.07);
-    c.fill();
-    c.strokeStyle = hexA(accent, 0.35);
-    c.lineWidth = 1;
-    c.stroke();
-
-    // eyes
-    const blink = Math.sin(t / 2600 + d.seed) > 0.985;
-    const eyeH = blink ? visorH * 0.10 : visorH * 0.34;
-    const eyeW = visorW * 0.20;
-    const eyeY = visorY + (visorH - eyeH) / 2;
-    c.shadowColor = hexA(accent, 0.95);
-    c.shadowBlur = s * 0.18;
-    c.fillStyle = hexA(accent, 0.95);
-    roundRect(c, x - visorW * 0.24, eyeY, eyeW, eyeH, eyeW * 0.4); c.fill();
-    roundRect(c, x + visorW * 0.04, eyeY, eyeW, eyeH, eyeW * 0.4); c.fill();
-    c.shadowBlur = 0;
-
-    // antenna
-    c.strokeStyle = "#2b3a4b";
-    c.lineWidth = Math.max(1, s * 0.035);
-    c.beginPath();
-    c.moveTo(x, headY);
-    c.lineTo(x, headY - s * 0.20);
-    c.stroke();
-    const antPulse = 0.4 + 0.6 * Math.abs(Math.sin(t / (working ? 420 : 1100) + d.seed));
-    c.fillStyle = hexA(accent, antPulse);
-    c.shadowColor = hexA(accent, 0.9);
-    c.shadowBlur = s * 0.2;
-    c.beginPath(); c.arc(x, headY - s * 0.22, s * 0.045, 0, Math.PI * 2); c.fill();
-    c.shadowBlur = 0;
-
-    // thinking bubble
-    if (thinking) {
-      const bx = x + headW * 0.58;
-      const by = headY - s * 0.30;
-      c.fillStyle = "rgba(12,20,29,0.92)";
-      c.strokeStyle = "rgba(251,191,36,0.5)";
-      c.lineWidth = 1;
-      roundRect(c, bx, by, s * 0.46, s * 0.24, s * 0.08);
-      c.fill(); c.stroke();
-      for (let i = 0; i < 3; i++) {
-        const a = 0.35 + 0.65 * Math.max(0, Math.sin(t / 260 - i * 0.7));
-        c.fillStyle = `rgba(251,191,36,${a})`;
-        c.beginPath(); c.arc(bx + s * (0.12 + i * 0.11), by + s * 0.12, s * 0.022, 0, Math.PI * 2); c.fill();
-      }
-    }
-
-    // learned flash
-    if (learned) {
-      const p = state.pulses.find((q) => q.agent === d.name && q.kind === "LEARNED");
-      const age = p ? (Date.now() - p.at) / 2200 : 1;
-      c.strokeStyle = `rgba(52,211,153,${(1 - age) * 0.8})`;
-      c.lineWidth = 2;
-      c.beginPath();
-      c.arc(x, headY + headH / 2, headW * (0.65 + age * 0.55), 0, Math.PI * 2);
-      c.stroke();
-    }
+  // =============================================================== archive
+  function renderArchive() {
+    const data = state.archive || {}, stats = data.stats || {}, trades = (data.trades || []).slice().reverse();
+    $("archive-path").textContent = `${String(stats.root || "archiv").replace(/\\/g, "/")}/trades`;
+    $("archive-hint").textContent = data.available === false ? "Archiv offline" : "Aktenschrank";
+    const realized = Number(stats.realized_profit), reported = Number(stats.trades_with_profit ?? 0);
+    const realizedTxt = reported > 0 && isFinite(realized) ? `${realized > 0 ? "+" : ""}${money(realized)}` : "—";
+    $("archive-stats").innerHTML = `<b>${stats.trades_total ?? trades.length}</b> Fills · <b>${stats.trades_closed ?? 0}</b> geschlossen · realisiert <b>${esc(realizedTxt)}</b>`;
+    const head = '<div class="ledger-row ledger-head"><span>zeit</span><span>markt</span><span>seite</span><span>grösse</span><span>einstieg</span><span>ausstieg</span><span>P/L</span><span>status</span></div>';
+    if (!trades.length) { $("ledger").innerHTML = head + '<div class="empty" style="padding:10px 12px">noch keine Trades archiviert</div>'; return; }
+    $("ledger").innerHTML = head + trades.map((t) => {
+      const side = String(t.side || "").toUpperCase(), pnl = t.profit == null ? null : Number(t.profit);
+      return `<div class="ledger-row"><span class="dim">${esc(fmtTime(t.time))}</span><span class="epic">${esc(t.epic)}</span>
+        <span class="side ${side === "BUY" ? "buy" : "sell"}">${esc(side)}</span><span>${esc(t.size ?? "—")}</span>
+        <span>${priceFmt(t.entry)}</span><span>${t.exit == null ? "—" : priceFmt(t.exit)}</span>
+        <span class="pnl ${pnl === null ? "dim" : pnl >= 0 ? "up" : "down"}">${pnl === null ? "—" : (pnl > 0 ? "+" : "") + money(pnl)}</span>
+        <span class="st ${t.status === "closed" ? "closed" : "open"}">${t.status === "closed" ? "zu" : "offen"}</span></div>`;
+    }).join("");
   }
 
-  // ------------------------------------------------------------------ desk
-  function drawDesk(c, d, t, st) {
-    const x = d.x, y = d.y, w = d.w;
-    const topH = Math.max(6, w * 0.035);
-    const panelH = w * 0.24;
-
-    // floor shadow
-    const sh = c.createRadialGradient(x, y + panelH * 0.9, 4, x, y + panelH * 0.9, w * 0.62);
-    sh.addColorStop(0, "rgba(0,0,0,0.55)");
-    sh.addColorStop(1, "rgba(0,0,0,0)");
-    c.fillStyle = sh;
-    c.beginPath();
-    c.ellipse(x, y + panelH * 0.9, w * 0.62, w * 0.11, 0, 0, Math.PI * 2);
-    c.fill();
-
-    // glossy floor reflection under the desk (sells the depth)
-    const refl = c.createLinearGradient(0, y + panelH * 0.6, 0, y + panelH * 2.6);
-    refl.addColorStop(0, hexA(d.color, 0.12));
-    refl.addColorStop(0.5, hexA(d.color, 0.04));
-    refl.addColorStop(1, hexA(d.color, 0));
-    c.fillStyle = refl;
-    c.beginPath();
-    c.moveTo(x - w * 0.30, y + panelH * 0.7);
-    c.lineTo(x + w * 0.30, y + panelH * 0.7);
-    c.lineTo(x + w * 0.48, y + panelH * 2.6);
-    c.lineTo(x - w * 0.48, y + panelH * 2.6);
-    c.closePath();
-    c.fill();
-
-    // desk top (slight perspective)
-    const inset = w * 0.03;
-    const topGrad = c.createLinearGradient(0, y, 0, y + topH);
-    topGrad.addColorStop(0, "#22303f");
-    topGrad.addColorStop(1, "#182430");
-    c.fillStyle = topGrad;
-    c.beginPath();
-    c.moveTo(x - w / 2 + inset, y);
-    c.lineTo(x + w / 2 - inset, y);
-    c.lineTo(x + w / 2, y + topH);
-    c.lineTo(x - w / 2, y + topH);
-    c.closePath();
-    c.fill();
-
-    // front panel
-    const panelGrad = c.createLinearGradient(0, y + topH, 0, y + topH + panelH);
-    panelGrad.addColorStop(0, "#101a24");
-    panelGrad.addColorStop(1, "#0a1119");
-    c.fillStyle = panelGrad;
-    c.fillRect(x - w / 2, y + topH, w, panelH);
-
-    // accent trim
-    c.fillStyle = hexA(d.color, state.selected === d.name ? 0.95 : 0.5);
-    c.fillRect(x - w / 2, y + topH, w, Math.max(2, topH * 0.28));
-
-    // name plate
-    c.fillStyle = "rgba(6,11,16,0.85)";
-    roundRect(c, x - w * 0.19, y + topH + panelH * 0.18, w * 0.38, panelH * 0.34, 3);
-    c.fill();
-    c.strokeStyle = hexA(d.color, 0.4);
-    c.lineWidth = 1;
-    c.stroke();
-
-    c.textAlign = "center";
-    c.textBaseline = "middle";
-    c.fillStyle = state.selected === d.name ? "#eaf4ff" : "#a8bccf";
-    c.font = `600 ${Math.max(8, w * 0.060)}px ui-monospace, monospace`;
-    c.fillText(d.name, x, y + topH + panelH * 0.35);
-
-    c.fillStyle = "#556a80";
-    c.font = `${Math.max(7, w * 0.042)}px ui-monospace, monospace`;
-    c.fillText(short(d.role || "", 26), x, y + topH + panelH * 0.80);
-    c.textBaseline = "alphabetic";
-
-    // status LED on the panel
-    const ledColor = st === "RUNNING" ? "#38bdf8" : (st === "THINKING" ? "#fbbf24" : (st === "LEARNED" ? "#34d399" : "#2a3646"));
-    c.fillStyle = ledColor;
-    c.shadowColor = ledColor;
-    c.shadowBlur = st === "IDLE" ? 0 : 6;
-    c.beginPath();
-    c.arc(x + w * 0.42, y + topH + panelH * 0.32, Math.max(1.6, w * 0.014), 0, Math.PI * 2);
-    c.fill();
-    c.shadowBlur = 0;
-
-    // monitor (left of centre so the robot stays visible)
-    const mw = w * 0.40;
-    const mh = mw * 0.60;
-    const mx = x - w * 0.34;
-    const my = y - mh - topH * 0.4;
-
-    // monitor stand
-    c.fillStyle = "#0c141c";
-    c.fillRect(mx + mw / 2 - mw * 0.06, y - mh * 0.18, mw * 0.12, mh * 0.22);
-    c.fillRect(mx + mw * 0.30, y - 2, mw * 0.40, Math.max(2, topH * 0.4));
-
-    // monitor body
-    c.fillStyle = "#080d13";
-    roundRect(c, mx, my, mw, mh, 3);
-    c.fill();
-    c.strokeStyle = "#1d2b3a";
-    c.lineWidth = 1;
-    c.stroke();
-
-    // screen glow
-    c.fillStyle = hexA(d.color, 0.10);
-    c.fillRect(mx + 2, my + 2, mw - 4, mh - 4);
-
-    // tiny chart on screen
-    const pad = 3;
-    const sx = mx + pad, sy = my + pad, sw = mw - pad * 2, sh2 = mh - pad * 2;
-    c.save();
-    c.beginPath(); c.rect(sx, sy, sw, sh2); c.clip();
-    c.strokeStyle = "rgba(120,160,200,0.16)";
-    c.lineWidth = 1;
-    for (let i = 1; i < 4; i++) {
-      c.beginPath(); c.moveTo(sx, sy + (sh2 / 4) * i); c.lineTo(sx + sw, sy + (sh2 / 4) * i); c.stroke();
-    }
-    // candlesticks (decorative, deterministic per agent)
-    const bars = 14;
-    for (let i = 0; i < bars; i++) {
-      const n = Math.sin(d.seed + i * 1.7) * 0.5 + Math.sin(i * 0.6 + d.seed * 0.3) * 0.5;
-      const cx2 = sx + (i + 0.5) * (sw / bars);
-      const cy2 = sy + sh2 * (0.5 - n * 0.32);
-      const up = n > 0;
-      c.strokeStyle = up ? "rgba(52,211,153,0.75)" : "rgba(251,113,133,0.75)";
-      c.fillStyle = c.strokeStyle;
-      c.lineWidth = 1;
-      c.beginPath(); c.moveTo(cx2, cy2 - sh2 * 0.12); c.lineTo(cx2, cy2 + sh2 * 0.12); c.stroke();
-      c.fillRect(cx2 - sw / bars * 0.22, cy2 - sh2 * 0.07, sw / bars * 0.44, sh2 * 0.14);
-    }
-    // scanner line
-    const scan = (t / 2600 + d.seed * 0.01) % 1;
-    c.fillStyle = hexA(d.color, 0.18);
-    c.fillRect(sx, sy + scan * sh2, sw, 1.5);
-    c.restore();
-
-    // keyboard
-    const kw = w * 0.34;
-    const kh = w * 0.075;
-    c.fillStyle = "#0d1620";
-    roundRect(c, x + w * 0.02, y - kh * 0.55, kw, kh, 2);
-    c.fill();
-    c.strokeStyle = "#1b2836";
-    c.stroke();
-    c.fillStyle = "rgba(150,185,220,0.16)";
-    for (let r = 0; r < 2; r++) {
-      for (let i = 0; i < 8; i++) {
-        c.fillRect(x + w * 0.03 + i * kw * 0.115, y - kh * 0.45 + r * kh * 0.32, kw * 0.07, kh * 0.16);
-      }
-    }
-
-    // mug
-    c.fillStyle = "#16222f";
-    roundRect(c, x + w * 0.36, y - w * 0.075, w * 0.055, w * 0.075, 2);
-    c.fill();
-    c.strokeStyle = hexA(d.color, 0.45);
-    c.stroke();
-
-    // papers
-    c.fillStyle = "rgba(190,210,230,0.10)";
-    c.save();
-    c.translate(x - w * 0.05, y - w * 0.012);
-    c.rotate(-0.08);
-    c.fillRect(0, 0, w * 0.12, w * 0.035);
-    c.restore();
-
-    // monitor glow spill on the desk
-    const spill = c.createRadialGradient(mx + mw / 2, y, 2, mx + mw / 2, y, mw * 0.9);
-    spill.addColorStop(0, hexA(d.color, 0.14));
-    spill.addColorStop(1, hexA(d.color, 0));
-    c.fillStyle = spill;
-    c.beginPath();
-    c.ellipse(mx + mw / 2, y + topH, mw * 0.9, topH * 1.6, 0, 0, Math.PI * 2);
-    c.fill();
-
-    // selection ring on the floor
-    if (state.selected === d.name || hover === d.name) {
-      c.strokeStyle = hexA(d.color, state.selected === d.name ? 0.85 : 0.35);
-      c.lineWidth = state.selected === d.name ? 2 : 1;
-      c.beginPath();
-      c.ellipse(x, y + panelH * 0.95, w * 0.56, w * 0.10, 0, 0, Math.PI * 2);
-      c.stroke();
-    }
-  }
-
-  function draw() {
-    if (!W || !H) return;
-    syncCanvasHeight();
-    layoutFloor();
-
-    parX = lerp(parX, (pointer.x - 0.5) * 14, 0.06);
-    parY = lerp(parY, (pointer.y - 0.5) * 9, 0.06);
-
-    if (!bgCache) bgCache = buildBackground();
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#04070b";
-    ctx.fillRect(0, 0, W, H);
-    ctx.drawImage(bgCache, -PAD + parX, -PAD + parY, W + PAD * 2, H + PAD * 2);
-
-    if (!desks.length) {
-      ctx.fillStyle = "#43536a";
-      ctx.font = "12px ui-monospace, monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("no active agents", W / 2, H * 0.55);
-      return;
-    }
-
-    const t = performance.now();
-    const ordered = [...desks].sort((a, b) => a.y - b.y || a.x - b.x);
-    for (const d of ordered) {
-      const st = agentState(d.name);
-      const o = depthOffset(d);
-      ctx.save();
-      ctx.translate(o.x, o.y);
-      drawRobot(ctx, d, t, st);
-      drawDesk(ctx, d, t, st);
-      ctx.restore();
-    }
-  }
-
-  function depthOffset(d) {
-    const k = 0.35 + (d.row || 0) * 0.28;
-    return { x: parX * k, y: parY * k * 0.55 };
-  }
-
-  // animation loop
-  let rafId = null;
-  function tick() {
-    draw();
-    rafId = requestAnimationFrame(tick);
-  }
-
-  // ------------------------------------------------------------- interaction
-  function canvasPoint(evt) {
-    const rect = canvas.getBoundingClientRect();
-    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
-  }
-
-  function deskAt(pt) {
-    for (const d of [...desks].reverse()) {
-      const o = depthOffset(d);
-      const px = pt.x - o.x;
-      const py = pt.y - o.y;
-      const s = d.w * 0.44;
-      const top = d.y - s * 2.1;
-      const bottom = d.y + d.w * 0.22;
-      if (px >= d.x - d.w / 2 - 10 && px <= d.x + d.w / 2 + 10 && py >= top && py <= bottom) return d;
+  // =============================================================== agent state
+  const now = () => Date.now();
+  function lastOf(name, types, withinMs) {
+    for (let i = state.events.length - 1; i >= 0; i--) {
+      const e = state.events[i];
+      if (e.agent_id !== name) continue;
+      if (now() - (e._at || 0) > withinMs) return null;
+      if (types.includes(e.type)) return e;
     }
     return null;
   }
+  function agentState(name) {
+    const running = state.tasks.find((t) => t.assigned_to === name && t.status === "RUNNING");
+    const err = lastOf(name, ["AGENT_INVALID", "TASK_FAILED"], 120000);
+    if (err) return { key: "error", label: "FEHLER", color: "#fb7185", detail: eventText(err) };
+    const res = lastOf(name, ["RESULT"], 600000);
+    if (res && parse(res.payload_json).status === "budget_exhausted") return { key: "budget", label: "BUDGET LEER", color: "#4b5563", detail: "Token-Budget für heute aufgebraucht" };
+    if (res && parse(res.payload_json).status === "llm_unavailable") return { key: "error", label: "LLM AUS", color: "#fb7185", detail: "Modell nicht erreichbar" };
+    const tool = lastOf(name, ["TOOL_CALL"], 15000);
+    if (tool) return { key: "tool", label: "WERKZEUG", color: "#a78bfa", detail: parse(tool.payload_json).tool };
+    const act = lastOf(name, ["ACTION"], 20000);
+    if (act) return { key: "tool", label: "AKTION", color: "#a78bfa", detail: ((parse(act.payload_json).action) || {}).type };
+    const learned = lastOf(name, ["LEARNED"], 20000);
+    if (learned) return { key: "learned", label: "GELERNT", color: "#34d399", detail: "neue Lektion" };
+    const thought = lastOf(name, ["THOUGHT"], 15000);
+    if (thought) return { key: "think", label: "DENKT", color: "#fbbf24", detail: short(parse(thought.payload_json).content, 60) };
+    if (running) return { key: "work", label: "ARBEITET", color: "#38bdf8", detail: running.title };
+    return { key: "idle", label: "WARTET", color: "#4b5563", detail: "keine offene Aufgabe" };
+  }
 
-  canvas.addEventListener("click", (e) => {
-    const d = deskAt(canvasPoint(e));
-    if (d) selectAgent(d.name);
-  });
-  canvas.addEventListener("mousemove", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    pointer = {
-      x: clamp((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
-      y: clamp((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1),
-    };
-    const d = deskAt(canvasPoint(e));
-    const next = d ? d.name : null;
-    if (next !== hover) {
-      hover = next;
-      canvas.style.cursor = next ? "pointer" : "default";
+  // =============================================================== inspector
+  function sparkline(daily) {
+    const days = Object.keys(daily || {}).sort().slice(-7);
+    if (!days.length) return '<div class="muted">noch keine Daten</div>';
+    const vals = days.map((d) => daily[d].valid_rate);
+    const W = 360, H = 34, step = days.length > 1 ? W / (days.length - 1) : W;
+    const pts = vals.map((v, i) => `${(i * step).toFixed(1)},${(H - 3 - (v == null ? 0 : v) * (H - 6)).toFixed(1)}`).join(" ");
+    return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Anteil gültiger Antworten pro Tag">
+      <polyline points="${pts}" fill="none" stroke="#34d399" stroke-width="2"/></svg>
+      <div class="muted" style="font-size:10px">${days.map((d, i) => `${d.slice(5)}: ${vals[i] == null ? "—" : Math.round(vals[i] * 100) + "%"}`).join(" · ")}</div>`;
+  }
+  function renderInspector() {
+    const name = state.selected;
+    const a = state.agents.find((x) => x.name === name);
+    if (!name) { $("insp").innerHTML = '<div class="empty">Klick auf einen Roboter im Büro (oder Tab im Büro).</div>'; $("inspector-hint").textContent = "Roboter auswählen"; return; }
+    if (!a) { $("insp").innerHTML = `<div class="insp-name">${esc(name)}</div><div class="empty">Schreibtisch frei — die Rolle ist nicht besetzt. Der CEO kann eine Einstellung vorschlagen; du gibst sie unter FREIGABEN frei.</div>`; return; }
+    const st = agentState(name), m = a.metrics_7d || {};
+    const task = state.tasks.find((t) => t.assigned_to === name && (t.status === "RUNNING" || t.status === "PENDING"));
+    const pb = (state.playbooks.active || {})[name];
+    const lessons = (state.lessons || []).filter((l) => l.agent_id === name);
+    const evs = state.events.filter((e) => e.agent_id === name && (state.inspFilter === "all"
+      || (state.inspFilter === "think" && ["THOUGHT", "RESULT"].includes(e.type))
+      || (state.inspFilter === "tools" && ["TOOL_CALL", "ACTION", "ACTION_REJECTED"].includes(e.type))
+      || (state.inspFilter === "errors" && ["AGENT_INVALID", "ACTION_REJECTED", "TASK_FAILED"].includes(e.type)))).slice(-25).reverse();
+    $("inspector-hint").textContent = "live";
+    $("insp").innerHTML = `
+      <div class="insp-name">${esc(a.name)}</div><div class="insp-role">${esc(a.role)}</div>
+      <span class="state" style="background:${st.color}22;color:${st.color};border:1px solid ${st.color}">${st.label}</span>
+      <span class="muted"> ${esc(short(st.detail, 80))}</span>
+      <div class="kv"><span>berichtet an</span><span>${esc(a.reporting_line || "— (Operator)")}</span>
+        <span>Aufgabe</span><span>${task ? esc(task.title) + " · " + esc(task.status) : "—"}</span>
+        <span>Tokens heute</span><span>${a.tokens_today ?? 0} / ${a.daily_token_budget ?? "—"}</span>
+        <span>Modell</span><span>${esc(a.model || "Standard")}</span></div>
+      <div><b class="muted" style="font-size:10px">WERKZEUGE</b><br>${(a.tools || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("") || "—"}</div>
+      <div><b class="muted" style="font-size:10px">DARF</b><br>${(a.actions || []).map((t) => `<span class="chip on">${esc(t)}</span>`).join("") || "—"}</div>
+      <div class="sec"><h3>QUALITÄT (7 TAGE, GEMESSEN)</h3>
+        <div class="kv"><span>Aufgaben</span><span>${m.tasks ?? 0}</span><span>gültig</span><span>${m.valid_rate == null ? "—" : Math.round(m.valid_rate * 100) + " %"}</span>
+        <span>verworfen</span><span>${m.invalid ?? 0}</span><span>Aktionen</span><span>${m.actions ?? 0} (abgelehnt ${m.rejected_actions ?? 0})</span>
+        <span>Werkzeuge ok</span><span>${m.tool_ok_rate == null ? "—" : Math.round(m.tool_ok_rate * 100) + " %"}</span></div>${sparkline(m.daily)}</div>
+      <div class="sec"><h3>PLAYBOOK ${pb ? "v" + pb.version : ""}</h3>${pb ? `<pre class="pb">${esc(pb.text)}</pre>` : '<div class="empty">kein Playbook</div>'}</div>
+      <div class="sec"><h3>GEDÄCHTNIS (${lessons.length})</h3><div id="insp-lessons">${lessons.map((l) => lessonRow(l, false)).join("") || '<div class="empty">keine Lektionen</div>'}</div></div>
+      <div class="sec"><h3>AKTIVITÄT</h3>
+        <div class="filters" id="insp-filters">${[["all", "ALLE"], ["think", "DENKEN"], ["tools", "WERKZEUGE/AKTIONEN"], ["errors", "FEHLER"]].map(([k, l]) => `<button data-f="${k}" class="${state.inspFilter === k ? "on" : ""}">${l}</button>`).join("")}</div>
+        ${evs.map((e) => `<div class="act"><span class="t">${esc(timeOf(e.ts))}</span><span class="ty" style="color:${TYPE_COLOR[e.type] || "#93a7bb"}">${esc(e.type)}</span>${esc(short(eventText(e), 300))}</div>`).join("") || '<div class="empty">keine Ereignisse</div>'}</div>`;
+    bindLessonDelete($("insp"));
+    $("insp-filters").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { state.inspFilter = b.dataset.f; renderInspector(); }));
+  }
+
+  // =============================================================== OFFICE FLOOR (Grundriss, 1200 x 720)
+  const canvas = $("office"), ctx = canvas.getContext("2d");
+  const W = 1200, H = 720;
+  const ROOMS = [
+    { id: "ceo", name: "CEO-BÜRO", x: 16, y: 16, w: 300, h: 210, tint: "#1d1a3a" },
+    { id: "lab", name: "RESEARCH-LABOR", x: 332, y: 16, w: 520, h: 210, tint: "#0f2a3a" },
+    { id: "risk", name: "RISIKO & SERVER", x: 868, y: 16, w: 316, h: 300, tint: "#3a0f19" },
+    { id: "intel", name: "MARKTANALYSE", x: 16, y: 242, w: 300, h: 262, tint: "#2a240b" },
+    { id: "floor", name: "TRADING FLOOR", x: 332, y: 242, w: 520, h: 262, tint: "#0b2a1d" },
+    { id: "conf", name: "KONFERENZ · RED TEAM", x: 868, y: 332, w: 316, h: 172, tint: "#2a0f2e" },
+    { id: "archive", name: "ARCHIV", x: 16, y: 520, w: 300, h: 184, tint: "#1a2230" },
+    { id: "hall", name: "FLUR · EINGANG", x: 332, y: 520, w: 852, h: 184, tint: "#111821" },
+  ];
+  const SEATS = {
+    CEO: { x: 166, y: 130 }, HeadOfResearch: { x: 430, y: 120 }, QuantDeveloper: { x: 592, y: 120 }, DataEngineer: { x: 754, y: 120 },
+    RiskOfficer: { x: 960, y: 200 }, MacroAnalyst: { x: 166, y: 390 }, ExecutionTrader: { x: 592, y: 430 },
+    RedTeam: { x: 1026, y: 440 }, Archivist: { x: 166, y: 620 },
+  };
+  const SPARE = [{ x: 520, y: 620 }, { x: 680, y: 620 }, { x: 840, y: 620 }, { x: 1000, y: 620 }];
+  const DOOR = { x: 1150, y: 690 };
+  const SCREEN = { x: 372, y: 262, w: 440, h: 92 };
+  const robots = {};     // name -> {x, y, seat, born}
+  const fx = [];         // effects: flights, flashes, sparkles
+  let known = null, scale = 1, focusIdx = -1;
+
+  function seatFor(name, taken) {
+    if (SEATS[name]) return SEATS[name];
+    return SPARE.find((s) => !taken.some((t) => t.x === s.x && t.y === s.y)) || SPARE[0];
+  }
+  function syncRobots() {
+    const names = state.agents.map((a) => a.name);
+    const taken = Object.values(robots).map((r) => r.seat);
+    for (const n of names) {
+      if (robots[n]) continue;
+      const seat = seatFor(n, taken); taken.push(seat);
+      const isNew = known !== null && !known.has(n);
+      robots[n] = isNew ? { x: DOOR.x, y: DOOR.y, seat, born: now() } : { x: seat.x, y: seat.y + 34, seat, born: 0 };
+      if (isNew) fx.push({ kind: "spark", x: DOOR.x, y: DOOR.y, at: now(), dur: 2500 });
+    }
+    for (const n of Object.keys(robots)) if (!names.includes(n)) delete robots[n];
+    known = new Set(names);
+  }
+
+  function resize() {
+    const cssW = canvas.clientWidth || 900, dpr = window.devicePixelRatio || 1;
+    scale = cssW / W;
+    canvas.width = Math.round(cssW * dpr); canvas.height = Math.round(cssW * H / W * dpr);
+    canvas.style.height = Math.round(cssW * H / W) + "px";
+    ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
+  }
+  function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+  function drawRooms(t) {
+    ctx.fillStyle = "#06090d"; ctx.fillRect(0, 0, W, H);
+    for (const r of ROOMS) {
+      const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
+      g.addColorStop(0, r.tint); g.addColorStop(1, "#0a0f15");
+      ctx.fillStyle = g; rr(r.x, r.y, r.w, r.h, 10); ctx.fill();
+      ctx.strokeStyle = "#2a3d52"; ctx.lineWidth = 2; ctx.stroke();
+      // floor tiles
+      ctx.strokeStyle = "rgba(255,255,255,0.025)"; ctx.lineWidth = 1;
+      for (let gx = r.x + 30; gx < r.x + r.w; gx += 30) { ctx.beginPath(); ctx.moveTo(gx, r.y + 4); ctx.lineTo(gx, r.y + r.h - 4); ctx.stroke(); }
+      for (let gy = r.y + 30; gy < r.y + r.h; gy += 30) { ctx.beginPath(); ctx.moveTo(r.x + 4, gy); ctx.lineTo(r.x + r.w - 4, gy); ctx.stroke(); }
+      ctx.fillStyle = "#8fa6bd"; ctx.font = "bold 11px ui-monospace, monospace"; ctx.fillText(r.name, r.x + 12, r.y + r.h - 10);
+    }
+    // doors (gaps) between rooms and hall
+    ctx.fillStyle = "#06090d";
+    [[150, 226], [150, 504], [590, 226], [590, 504], [1026, 316], [1026, 504]].forEach(([x, y]) => ctx.fillRect(x - 22, y - 4, 44, 8));
+    // entrance
+    ctx.fillStyle = "#34d39944"; ctx.fillRect(DOOR.x - 26, H - 18, 52, 6);
+    ctx.fillStyle = "#86efac"; ctx.font = "10px ui-monospace, monospace"; ctx.fillText("EINGANG", DOOR.x - 24, H - 22);
+    // decoration: plants, CEO window, archive cabinets, conference table
+    plant(40, 40); plant(290, 40); plant(40, 480); plant(842, 690 - 30);
+    ctx.fillStyle = "#132233"; rr(56, 40, 220, 14, 4); ctx.fill();   // CEO window
+    for (let i = 0; i < 5; i++) { ctx.fillStyle = "#1e2a38"; rr(40 + i * 50, 540, 40, 26, 3); ctx.fill(); ctx.fillStyle = "#33465c"; ctx.fillRect(48 + i * 50, 551, 24, 3); }
+    ctx.fillStyle = "#2d1a33"; ctx.beginPath(); ctx.ellipse(1026, 408, 110, 26, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#5b3466"; ctx.stroke();
+    drawServerRacks(t);
+    drawWallScreen(t);
+  }
+  function plant(x, y) { ctx.fillStyle = "#3f2d1a"; ctx.beginPath(); ctx.arc(x, y, 9, 0, 7); ctx.fill(); ctx.fillStyle = "#15803d";
+    for (let i = 0; i < 6; i++) { ctx.beginPath(); ctx.ellipse(x + Math.cos(i) * 8, y + Math.sin(i) * 8, 7, 3, i, 0, 7); ctx.fill(); } }
+
+  function freshness() {
+    const s = state.status || {};
+    const snap = ageSec(s.snapshot_ts);
+    const st = s.stream || null;
+    const gateAge = (s.strategy && s.strategy.gate && s.strategy.gate.created) ? (Date.now() / 1000 - s.strategy.gate.created) : null;
+    const agentAct = state.events.filter((e) => ["RESULT", "THOUGHT"].includes(e.type)).slice(-1)[0];
+    return [
+      ["BROKER", snap === null ? "off" : snap < 180 ? "ok" : snap < 900 ? "warn" : "bad"],
+      ["KURSE", !st ? "off" : st.connected ? "ok" : "bad"],
+      ["FORSCHUNG", gateAge === null ? "warn" : gateAge < 8 * 86400 ? "ok" : "bad"],
+      ["AGENTEN", !agentAct ? "warn" : ageSec(agentAct.ts) < 86400 ? "ok" : "warn"],
+    ];
+  }
+  function drawServerRacks(t) {
+    const lights = { ok: "#34d399", warn: "#fbbf24", bad: "#ef4444", off: "#374151" };
+    freshness().forEach(([label, s], i) => {
+      const x = 1040 + (i % 2) * 70, y = 40 + Math.floor(i / 2) * 110;
+      ctx.fillStyle = "#0f1720"; rr(x, y, 56, 92, 5); ctx.fill(); ctx.strokeStyle = "#2a3d52"; ctx.stroke();
+      for (let k = 0; k < 6; k++) {
+        const on = s === "ok" ? (Math.sin(t / 180 + k * 1.7 + i) > -0.2) : s !== "off";
+        ctx.fillStyle = on ? lights[s] : "#1f2937"; ctx.fillRect(x + 8, y + 10 + k * 12, 6, 4);
+        ctx.fillStyle = "#1c2734"; ctx.fillRect(x + 20, y + 10 + k * 12, 28, 4);
+      }
+      ctx.fillStyle = lights[s]; ctx.font = "bold 9px ui-monospace, monospace"; ctx.fillText(label, x + 2, y + 88);
+    });
+    const halted = (state.status && state.status.kill_switch_active);
+    if (halted) { ctx.fillStyle = `rgba(239,68,68,${0.15 + 0.15 * Math.sin(t / 150)})`; rr(868, 16, 316, 300, 10); ctx.fill(); }
+  }
+  function drawWallScreen(t) {
+    const s = state.status || {}, x = SCREEN.x, y = SCREEN.y;
+    ctx.fillStyle = "#03110b"; rr(x, y, SCREEN.w, SCREEN.h, 6); ctx.fill();
+    const flash = fx.find((f) => f.kind === "screen" && now() - f.at < f.dur);
+    ctx.strokeStyle = flash ? flash.color : "#14532d"; ctx.lineWidth = flash ? 3 : 2; ctx.stroke(); ctx.lineWidth = 1;
+    ctx.fillStyle = "#86efac"; ctx.font = "bold 12px ui-monospace, monospace";
+    const eq = state.apiOk ? money(s.equity) : "OFFLINE";
+    const pnl = s.today && s.today.pnl != null ? (s.today.pnl > 0 ? "+" : "") + money(s.today.pnl) : "—";
+    ctx.fillText(`EQUITY ${eq}   HEUTE ${pnl}   POSITIONEN ${(s.positions || []).length}`, x + 12, y + 20);
+    const lastTrade = state.events.filter((e) => ["ORDER_FILLED", "TRADE_RESULT", "POSITION_CLOSED"].includes(e.type)).slice(-1)[0];
+    ctx.fillStyle = "#a7f3d0"; ctx.font = "11px ui-monospace, monospace";
+    ctx.fillText(lastTrade ? short(`${lastTrade.type}: ${eventText(lastTrade)}`, 62) : "noch kein Trade in dieser Sitzung", x + 12, y + 40);
+    // ticker
+    const quotes = (s.stream && s.stream.quotes) || {};
+    const items = Object.entries(quotes).map(([e, q]) => `${e} ${priceFmt(q.bid)}/${priceFmt(q.ask)} (${fmtAge(q.age_s)})`);
+    const txt = items.length ? items.join("   ·   ") + "   ·   " : "Live-Kurse: Stream nicht verbunden (REST-Kurse im Desk)   ·   ";
+    ctx.save(); rr(x + 6, y + 52, SCREEN.w - 12, 30, 4); ctx.clip();
+    ctx.fillStyle = "#052e1a"; ctx.fillRect(x + 6, y + 52, SCREEN.w - 12, 30);
+    ctx.fillStyle = "#fde68a"; ctx.font = "12px ui-monospace, monospace";
+    const tw = ctx.measureText(txt).width, off = (t / 30) % tw;
+    for (let k = -1; k < 3; k++) ctx.fillText(txt, x + 10 - off + k * tw, y + 72);
+    ctx.restore();
+  }
+
+  function drawDesk(seat, occupied, sel, color, st, t) {
+    const x = seat.x, y = seat.y;
+    ctx.fillStyle = sel ? "#1b2e44" : "#16212d"; rr(x - 52, y - 22, 104, 40, 6); ctx.fill();
+    ctx.strokeStyle = sel ? "#38bdf8" : "#2a3d52"; ctx.lineWidth = sel ? 2 : 1; ctx.stroke(); ctx.lineWidth = 1;
+    // monitors
+    const glow = occupied && ["work", "think", "tool", "learned"].includes(st.key);
+    for (const dx of [-24, 6]) {
+      ctx.fillStyle = "#0b1118"; rr(x + dx, y - 18, 22, 14, 2); ctx.fill();
+      ctx.fillStyle = glow ? `${st.color}${Math.floor(120 + 80 * Math.sin(t / 200 + dx)).toString(16).padStart(2, "0")}` : occupied ? "#1e293b" : "#111827";
+      ctx.fillRect(x + dx + 2, y - 16, 18, 10);
+    }
+    if (!occupied) { ctx.fillStyle = "#4b5563"; ctx.font = "10px ui-monospace, monospace"; ctx.fillText("frei", x - 10, y + 12); }
+    // chair
+    ctx.fillStyle = "#1f2b38"; ctx.beginPath(); ctx.arc(x, y + 36, 15, 0, 7); ctx.fill();
+  }
+
+  function drawRobot(name, r, a, st, t) {
+    const sel = state.selected === name, color = colorFor(name);
+    let { x, y } = r;
+    const bob = st.key === "work" ? Math.sin(t / 90) * 1.5 : st.key === "idle" || st.key === "budget" ? Math.sin(t / 900) * 1 : Math.sin(t / 300) * 1.2;
+    // shadow
+    ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.beginPath(); ctx.ellipse(x, y + 20, 18, 6, 0, 0, 7); ctx.fill();
+    if (sel) { ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 2; ctx.beginPath(); ctx.ellipse(x, y + 20, 24, 9, 0, 0, 7); ctx.stroke(); ctx.lineWidth = 1; }
+    y += bob;
+    // arms (typing motion)
+    const armA = st.key === "work" ? Math.sin(t / 70) * 3 : 0;
+    ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 4; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x - 14, y + 2); ctx.lineTo(x - 18, y - 10 + armA); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + 14, y + 2); ctx.lineTo(x + 18, y - 10 - armA); ctx.stroke(); ctx.lineWidth = 1;
+    // body
+    const bg = ctx.createLinearGradient(x, y - 4, x, y + 20);
+    bg.addColorStop(0, color); bg.addColorStop(1, "#0f172a");
+    ctx.fillStyle = st.key === "budget" ? "#374151" : bg; rr(x - 15, y - 4, 30, 24, 8); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.18)"; ctx.fillRect(x - 6, y + 4, 12, 3);
+    // head
+    ctx.fillStyle = "#cbd5e1"; rr(x - 13, y - 26, 26, 20, 7); ctx.fill();
+    ctx.fillStyle = "#0b1118"; rr(x - 10, y - 21, 20, 9, 4); ctx.fill();
+    ctx.fillStyle = st.color; ctx.shadowColor = st.color; ctx.shadowBlur = st.key === "idle" ? 0 : 8;
+    const eye = st.key === "idle" && Math.sin(t / 1400) > 0.97 ? 1 : 4;
+    ctx.fillRect(x - 7, y - 19 + (4 - eye) / 2, 5, eye); ctx.fillRect(x + 2, y - 19 + (4 - eye) / 2, 5, eye);
+    ctx.shadowBlur = 0;
+    // antenna
+    ctx.strokeStyle = "#94a3b8"; ctx.beginPath(); ctx.moveTo(x, y - 26); ctx.lineTo(x, y - 33); ctx.stroke();
+    ctx.fillStyle = Math.sin(t / 250) > 0 ? st.color : "#334155"; ctx.beginPath(); ctx.arc(x, y - 35, 3, 0, 7); ctx.fill();
+    // name tag
+    ctx.font = "bold 10px ui-monospace, monospace"; const tw = ctx.measureText(name).width + 10;
+    ctx.fillStyle = "rgba(7,11,16,.85)"; rr(x - tw / 2, y + 26, tw, 14, 4); ctx.fill();
+    ctx.fillStyle = sel ? "#e0f2fe" : "#b6c6d8"; ctx.fillText(name, x - tw / 2 + 5, y + 36);
+    // status badges / bubbles
+    if (st.key === "think") bubble(x + 18, y - 44, "• • •".slice(0, 1 + Math.floor(t / 300) % 3 * 2), "#fbbf24");
+    else if (st.key === "tool") bubble(x + 18, y - 44, "⚙ " + short(st.detail || "", 18), "#a78bfa");
+    else if (st.key === "error") bubble(x + 18, y - 44, "! " + st.label, "#fb7185");
+    else if (st.key === "budget") bubble(x + 18, y - 44, "zZ", "#9ca3af");
+    else if (st.key === "learned") { for (let k = 0; k < 5; k++) { const ang = t / 300 + k * 1.26; star(x + Math.cos(ang) * 24, y - 12 + Math.sin(ang) * 16, "#34d399"); } }
+  }
+  function bubble(x, y, text, color) {
+    ctx.font = "bold 10px ui-monospace, monospace"; const w = ctx.measureText(text).width + 12;
+    ctx.fillStyle = "rgba(7,11,16,.92)"; rr(x, y, w, 18, 6); ctx.fill(); ctx.strokeStyle = color; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + 6, y + 18); ctx.lineTo(x, y + 26); ctx.lineTo(x + 14, y + 18); ctx.fillStyle = "rgba(7,11,16,.92)"; ctx.fill();
+    ctx.fillStyle = color; ctx.fillText(text, x + 6, y + 13);
+  }
+  function star(x, y, c) { ctx.fillStyle = c; ctx.font = "12px sans-serif"; ctx.fillText("✦", x - 4, y + 4); }
+  function colorFor(n) { const P = ["#38bdf8", "#34d399", "#fbbf24", "#a78bfa", "#fb7185", "#2dd4bf", "#f472b6", "#93c5fd", "#fdba74"]; let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return P[h % P.length]; }
+
+  function seatPos(name) { const r = robots[name]; return r ? { x: r.seat.x, y: r.seat.y + 34 } : null; }
+  function drawFx(t) {
+    for (let i = fx.length - 1; i >= 0; i--) {
+      const f = fx[i], p = (now() - f.at) / f.dur;
+      if (p >= 1) { fx.splice(i, 1); continue; }
+      if (f.kind === "flight") {
+        const e = 1 - Math.pow(1 - p, 3), x = f.x0 + (f.x1 - f.x0) * e, y = f.y0 + (f.y1 - f.y0) * e - Math.sin(p * Math.PI) * 60;
+        ctx.fillStyle = "#f8fafc"; rr(x - 9, y - 6, 18, 12, 2); ctx.fill(); ctx.strokeStyle = "#64748b"; ctx.beginPath(); ctx.moveTo(x - 9, y - 6); ctx.lineTo(x, y + 1); ctx.lineTo(x + 9, y - 6); ctx.stroke();
+      } else if (f.kind === "spark") {
+        for (let k = 0; k < 8; k++) { const ang = k * 0.785 + p * 3; star(f.x + Math.cos(ang) * 30 * p, f.y - 20 + Math.sin(ang) * 30 * p, "#34d399"); }
+      } else if (f.kind === "ring") {
+        ctx.strokeStyle = f.color; ctx.globalAlpha = 1 - p; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(f.x, f.y, 20 + p * 60, 0, 7); ctx.stroke(); ctx.globalAlpha = 1; ctx.lineWidth = 1;
+      }
+    }
+  }
+  function moveRobots() {
+    for (const r of Object.values(robots)) {
+      const tx = r.seat.x, ty = r.seat.y + 34;
+      // walk: first along the hall (y), then to the desk
+      const hallY = 620, dx = tx - r.x, dy = ty - r.y;
+      if (Math.abs(dx) + Math.abs(dy) < 1) { r.x = tx; r.y = ty; continue; }
+      const speed = 2.2;
+      if (r.born && Math.abs(dx) > 2 && Math.abs(r.y - hallY) > 2 && r.y > 500) { r.y += Math.sign(hallY - r.y) * Math.min(speed, Math.abs(hallY - r.y)); continue; }
+      if (Math.abs(dx) > 2) r.x += Math.sign(dx) * Math.min(speed, Math.abs(dx));
+      else r.y += Math.sign(dy) * Math.min(speed, Math.abs(dy));
+    }
+  }
+  function draw() {
+    const t = now();
+    drawRooms(t);
+    const takenSeats = new Set(Object.values(robots).map((r) => `${r.seat.x},${r.seat.y}`));
+    for (const [n, s] of Object.entries(SEATS)) drawDesk(s, takenSeats.has(`${s.x},${s.y}`), state.selected === n, null, { key: "idle" }, t);
+    moveRobots();
+    for (const [name, r] of Object.entries(robots).sort((a, b) => a[1].y - b[1].y)) {
+      const st = agentState(name);
+      if (!SEATS[name]) drawDesk(r.seat, true, state.selected === name, null, st, t);
+      else if (["work", "think", "tool", "learned"].includes(st.key)) drawDesk(r.seat, true, state.selected === name, null, st, t);
+      drawRobot(name, r, state.agents.find((a) => a.name === name), st, t);
+    }
+    drawFx(t);
+    requestAnimationFrame(draw);
+  }
+  function hit(evt) {
+    const rect = canvas.getBoundingClientRect(), x = (evt.clientX - rect.left) / (rect.width / W), y = (evt.clientY - rect.top) / (rect.height / H);
+    for (const [name, r] of Object.entries(robots)) if (Math.abs(x - r.x) < 26 && y > r.y - 40 && y < r.y + 42) return name;
+    for (const [name, s] of Object.entries(SEATS)) if (Math.abs(x - s.x) < 55 && Math.abs(y - s.y) < 30) return name;
+    return null;
+  }
+  canvas.addEventListener("click", (e) => { const n = hit(e); if (n) { state.selected = n; renderInspector(); } });
+  canvas.addEventListener("keydown", (e) => {
+    const names = [...new Set([...Object.keys(robots), ...Object.keys(SEATS)])];
+    if (e.key === "Tab" || e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      e.preventDefault(); focusIdx = (focusIdx + (e.key === "ArrowLeft" || e.shiftKey ? -1 : 1) + names.length) % names.length;
+      state.selected = names[focusIdx]; renderInspector();
     }
   });
-  canvas.addEventListener("mouseleave", () => {
-    hover = null;
-    pointer = { x: 0.5, y: 0.5 };
-  });
 
-  // ---------------------------------------------------------------- websocket
-  let ws = null;
-  let backoff = 1000;
+  // =============================================================== events
+  function onEvent(e, live) {
+    e._at = live ? now() : (Date.parse(String(e.ts) + "Z") || now());
+    state.events.push(e);
+    if (state.events.length > 600) state.events.splice(0, state.events.length - 450);
+    if (!live) return;
+    const p = parse(e.payload_json);
+    if (e.type === "TASK_CREATED") {
+      const from = seatPos("CEO") || { x: 166, y: 160 }, to = seatPos(p.assigned_to);
+      if (to) fx.push({ kind: "flight", x0: from.x, y0: from.y - 30, x1: to.x, y1: to.y - 30, at: now(), dur: 1400 });
+    }
+    if (e.type === "ORDER_FILLED") fx.push({ kind: "screen", color: "#34d399", at: now(), dur: 2500 });
+    if (e.type === "TRADE_REJECTED") fx.push({ kind: "screen", color: "#fbbf24", at: now(), dur: 1500 });
+    if (["TRADING_HALTED", "STRATEGY_STOPPED"].includes(e.type)) fx.push({ kind: "ring", x: 960, y: 160, color: "#ef4444", at: now(), dur: 2000 });
+    if (e.type === "RISK_TIGHTENED") fx.push({ kind: "ring", x: 960, y: 200, color: "#fbbf24", at: now(), dur: 1500 });
+    if (e.type === "LEARNED" && seatPos(e.agent_id)) { const s = seatPos(e.agent_id); fx.push({ kind: "spark", x: s.x, y: s.y, at: now(), dur: 1500 }); }
+    if (e.type === "AGENT_HIRED") setTimeout(refreshAgents, 300);
+    if (e.type === "ACCOUNT_SNAPSHOT" && state.status) {
+      Object.assign(state.status, { balance: p.balance, equity: p.equity, positions: p.positions || [], stream: p.stream, snapshot_ts: e.ts });
+      renderHeader(); renderPositions();
+    }
+    if (TRADE_TYPES.includes(e.type) || RESEARCH_TYPES.includes(e.type) || ALERT_TYPES.includes(e.type)) debounce("status", refreshStatus, 800);
+    if (["ORDER_FILLED", "POSITION_CLOSED", "TRADE_RESULT"].includes(e.type)) debounce("archive", refreshArchive, 1200);
+    if (String(e.type).startsWith("TASK")) debounce("tasks", refreshTasks, 400);
+    if (["LEARNED", "LESSON_CONFLICT", "LESSON_DELETED"].includes(e.type)) debounce("lessons", refreshLessons, 600);
+    if (["HIRING_REQUEST", "HIRING_APPROVAL", "PLAYBOOK_PROPOSED", "PLAYBOOK_APPROVED", "PLAYBOOK_REJECTED"].includes(e.type)) debounce("appr", refreshApprovals, 500);
+    debounce("feed", () => { renderFeed(); if (state.selected === e.agent_id) renderInspector(); }, 250);
+  }
+  const timers = {};
+  function debounce(k, fn, ms) { clearTimeout(timers[k]); timers[k] = setTimeout(fn, ms); }
 
+  let ws = null, backoff = 1000;
   function connectWS() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const url = `${proto}://${location.host}/ws/office?token=${encodeURIComponent(state.token)}`;
-    try { ws = new WebSocket(url); } catch { scheduleReconnect(); return; }
-
-    ws.onopen = () => {
-      state.connected = true;
-      backoff = 1000;
-      $("ws-dot").className = "dot ok";
-      $("ws-label").textContent = "LIVE";
-    };
-
-    ws.onmessage = (message) => {
-      let msg;
-      try { msg = JSON.parse(message.data); } catch { return; }
-
+    try { ws = new WebSocket(`${proto}://${location.host}/ws/office?token=${encodeURIComponent(state.token)}`); } catch { return retry(); }
+    ws.onopen = () => { state.connected = true; backoff = 1000; $("ws-dot").className = "dot ok"; $("ws-label").textContent = "VERBUNDEN"; setOffline(); };
+    ws.onmessage = (m) => {
+      let msg; try { msg = JSON.parse(m.data); } catch { return; }
       if (msg.type === "SYNC") {
-        state.events = msg.data || [];
+        state.events = []; (msg.data || []).forEach((e) => onEvent(e, false));
         if (msg.tasks) state.tasks = msg.tasks;
-        if (msg.status) state.status = msg.status;
-        indexEvents();
-        renderAll();
-        refreshAgents();
-        refreshLessons();
-      } else if (msg.type === "EVENT") {
-        handleEvent(msg.data);
-      } else if (msg.type === "SYSTEM") {
-        toast(msg.content || "system message");
-      }
+        if (msg.status) { state.status = msg.status; state.apiOk = true; }
+        renderHeader(); renderAlarms(); renderWall(); renderPositions(); renderTasks(); renderFeed(); renderInspector();
+      } else if (msg.type === "EVENT") onEvent(msg.data, true);
+      else if (msg.type === "SYSTEM") toast(msg.content || "Systemmeldung");
     };
-
     ws.onclose = (evt) => {
-      state.connected = false;
-      $("ws-dot").className = "dot bad";
-      $("ws-label").textContent = evt.code === 4401 ? "AUTH" : "OFFLINE";
-      if (evt.code === 4401) showTokenOverlay();
-      scheduleReconnect();
+      state.connected = false; $("ws-dot").className = "dot bad"; $("ws-label").textContent = evt.code === 4401 ? "TOKEN" : "OFFLINE";
+      if (evt.code === 4401) $("token-overlay").classList.add("show");
+      refreshStatus(); retry();
     };
-
-    ws.onerror = () => { /* onclose handles it */ };
   }
+  function retry() { const d = backoff; backoff = Math.min(backoff * 1.7, 15000); setTimeout(connectWS, d); }
 
-  function scheduleReconnect() {
-    const delay = backoff;
-    backoff = Math.min(backoff * 1.7, 15000);
-    setTimeout(connectWS, delay);
-  }
-
-  function indexEvents() {
-    state.lastEventByAgent = {};
-    for (const evt of state.events) {
-      if (evt.agent_id) {
-        evt._at = Date.parse(evt.ts) || Date.now();
-        state.lastEventByAgent[evt.agent_id] = evt;
-      }
-    }
-  }
-
-  function handleEvent(evt) {
-    if (!evt) return;
-    evt._at = Date.now();
-    state.events.push(evt);
-    if (state.events.length > 400) state.events = state.events.slice(-300);
-    if (evt.agent_id) {
-      state.lastEventByAgent[evt.agent_id] = evt;
-      if (evt.type === "LEARNED") {
-        state.pulses.push({ agent: evt.agent_id, kind: "LEARNED", at: Date.now() });
-      }
-    }
-
-    if (evt.type === "ACCOUNT_SNAPSHOT") {
-      const p = parsePayload(evt.payload_json);
-      if (state.status) {
-        state.status.balance = p.balance ?? state.status.balance;
-        state.status.equity = p.equity ?? state.status.equity;
-        state.status.profit_loss = p.profit_loss ?? state.status.profit_loss;
-        state.status.positions = p.positions ?? state.status.positions;
-        state.status.account_source = p.source ?? state.status.account_source;
-      }
-      renderHeader();
-      renderPositions();
-    }
-    if (TRADE_TYPES.includes(evt.type)) {
-      clearTimeout(handleEvent._posTimer);
-      handleEvent._posTimer = setTimeout(refreshStatus, 800);
-      clearTimeout(handleEvent._archTimer);
-      handleEvent._archTimer = setTimeout(refreshArchive, 1200);
-    }
-    if (String(evt.type).startsWith("TASK")) {
-      clearTimeout(handleEvent._taskTimer);
-      handleEvent._taskTimer = setTimeout(refreshTasks, 400);
-    }
-    if (evt.type === "LEARNED") {
-      clearTimeout(handleEvent._lessonTimer);
-      handleEvent._lessonTimer = setTimeout(refreshLessons, 600);
-    }
-
-    renderFeed();
-    renderRoster();
-    renderInspector();
-  }
-
-  // ---------------------------------------------------------------- controls
+  // =============================================================== controls / boot
   $("kill").addEventListener("click", async () => {
-    if (!confirm("ACTIVATE KILL SWITCH?\n\nThis halts the firm and flattens all positions.")) return;
-    try {
-      await fetch("/api/halt", { method: "POST", headers: authHeaders() });
-      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "KILL_SWITCH" }));
-      toast("KILL SWITCH ACTIVATED");
-    } catch (e) {
-      toast("Kill switch failed: " + e.message);
-    }
+    if (!confirm("KILL SWITCH AUSLÖSEN?\n\nAlle Positionen werden glattgestellt und die Firma hält an.\nNeustart nur über: python -m src.firm resume")) return;
+    try { await post("/api/halt"); if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "KILL_SWITCH" })); toast("KILL SWITCH AUSGELÖST"); }
+    catch (e) { toast("Kill Switch fehlgeschlagen: " + e.message); }
   });
-
   $("filters").addEventListener("click", (e) => {
-    const btn = e.target.closest("button[data-f]");
-    if (!btn) return;
-    state.filter = btn.dataset.f;
-    for (const b of $("filters").querySelectorAll("button")) b.classList.toggle("on", b === btn);
-    renderFeed();
+    const b = e.target.closest("button[data-f]"); if (!b) return;
+    state.filter = b.dataset.f; $("filters").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); renderFeed();
   });
-
   $("token-save").addEventListener("click", () => {
-    const value = $("token-input").value.trim();
-    if (!value) return;
-    state.token = value;
-    sessionStorage.setItem("firm_token", value);
-    $("token-overlay").classList.remove("show");
-    if (ws) { try { ws.close(); } catch {} }
-    loadAll();
-    connectWS();
+    const v = $("token-input").value.trim(); if (!v) return;
+    state.token = v; sessionStorage.setItem("firm_token", v); $("token-overlay").classList.remove("show");
+    if (ws) try { ws.close(); } catch {}
+    loadAll(); connectWS();
   });
   $("token-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("token-save").click(); });
-
   $("archive-refresh").addEventListener("click", refreshArchive);
 
-  // ---------------------------------------------------------------- boot
   const params = new URLSearchParams(location.search);
   state.token = params.get("token") || sessionStorage.getItem("firm_token") || "";
-  if (params.get("token")) {  // Token aus der Adresszeile entfernen (Verlauf/Screenshots)
-    sessionStorage.setItem("firm_token", state.token);
-    history.replaceState(null, "", location.pathname);
-  }
-
-  window.addEventListener("resize", () => {
-    layoutKey = "";
-    resizeCanvas();
-  });
-  if (window.ResizeObserver) {
-    new ResizeObserver(() => {
-      layoutKey = "";
-      resizeCanvas();
-    }).observe(canvas);
-  }
-
-  resizeCanvas();
-  loadAll().catch(() => {});
+  if (params.get("token")) { sessionStorage.setItem("firm_token", state.token); history.replaceState(null, "", location.pathname); }
+  window.addEventListener("resize", resize);
+  resize();
+  loadAll().then(() => { known = new Set(state.agents.map((a) => a.name)); });
   connectWS();
-  if (rafId === null) tick();
-
+  requestAnimationFrame(draw);
   setInterval(refreshStatus, 10000);
   setInterval(refreshAgents, 20000);
-  setInterval(refreshArchive, 20000);
+  setInterval(refreshApprovals, 30000);
+  setInterval(refreshArchive, 30000);
+  setInterval(renderInspector, 5000);
 })();
 </script>
 </body>

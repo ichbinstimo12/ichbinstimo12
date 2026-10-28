@@ -55,6 +55,8 @@ class SignalEngineV2:
         if self._last_bar.get(epic) == bar_ts:
             return None                      # diese Kerze wurde schon ausgewertet
         self._last_bar[epic] = bar_ts
+        if not self.strat.can_enter_at(self.now()):
+            return None                      # Daytrading: ausserhalb des Handelsfensters keine Einstiege
         ind = lab.Ind(cs)
         sig = self.strat.entry(ind, i)
         if not sig:
@@ -79,6 +81,8 @@ class SignalEngineV2:
     def should_exit(self, epic, candles, side: str, opened_ts: Optional[float] = None) -> bool:
         """Exit-Regel der Strategie auf der letzten abgeschlossenen Kerze (Gegenkanal/Signalwechsel/Zeit-Stop).
         Der Zeit-Stop (`max_bars`) gilt wie im Backtest: Kerzen seit Einstieg >= max_bars -> raus."""
+        if opened_ts and self.strat.must_flat(opened_ts, self.now()):
+            return True                      # Daytrading: vor Sitzungsende bzw. am Tageswechsel glattstellen
         cs = self._closed(candles)
         if len(cs) < self.warmup:
             return False

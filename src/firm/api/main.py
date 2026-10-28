@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -75,7 +75,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type", "Authorization"],
     )
 
@@ -98,9 +98,48 @@ def create_app(
         return None
 
     archive_cache: Dict[str, Any] = {"at": 0.0, "stats": None}
+    # In split mode (supervisor) there is no orchestrator in this process: everything comes from the shared DB/files.
+    _local: Dict[str, Any] = {}
+
+    def _get(key: str, factory):
+        if key not in _local:
+            _local[key] = factory()
+        return _local[key]
 
     def archive_obj() -> Any:
-        return getattr(orchestrator, "archive", None)
+        if getattr(orchestrator, "archive", None) is not None:
+            return orchestrator.archive
+        from src.firm.archive.store import Archive
+        return _get("archive", lambda: Archive(os.getenv("FIRM_ARCHIVE_DIR", "archiv")))
+
+    def memory_obj() -> Any:
+        mem = getattr(getattr(orchestrator, "agent_runtime", None), "memory", None)
+        if mem is not None:
+            return mem
+        from src.firm.agents.memory import LessonStore
+        return _get("memory", lambda: LessonStore(store.db_path))
+
+    def ceo_obj() -> Any:
+        if getattr(orchestrator, "ceo", None) is not None:
+            return orchestrator.ceo
+        from src.firm.agents.ceo_manager import CEOManager
+        return _get("ceo", lambda: CEOManager(store))
+
+    def agent_configs() -> List[Dict[str, Any]]:
+        runtime = getattr(orchestrator, "agent_runtime", None)
+        if runtime is not None:
+            from dataclasses import asdict
+            return [asdict(c) for c in runtime.active_agents.values() if c is not None]
+        from src.firm.agents.registry import read_agents
+        return read_agents(store.db_path)
+
+    def whitelist() -> List[str]:
+        import tomllib
+        try:
+            with open("config/whitelist.toml", "rb") as f:
+                return list(tomllib.load(f).get("allowed_epics") or [])
+        except OSError:
+            return []
 
     async def cached_archive_stats(ttl: float = 15.0) -> Dict[str, Any]:
         """Archive stats walk the disk, so cache them briefly for the dashboard."""
@@ -131,8 +170,20 @@ def create_app(
             except (json.JSONDecodeError, TypeError):
                 desk_status = None
         research = store.get_events(types=["RESEARCH_STARTED", "RESEARCH_DONE", "RESEARCH_FAILED"], last=1)
+        ov = gate.overview()
+        stopped = []
+        for e in store.get_events(types=["STRATEGY_STOPPED"], last=50):
+            try:
+                pl = json.loads(e["payload_json"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            created = ov.get("created") or 0
+            if datetime.fromisoformat(e["ts"]).timestamp() >= created - 7200:   # stops since the current verdicts
+                stopped.append({"epic": pl.get("epic"), "strategy": pl.get("strategy"), "ts": e["ts"],
+                                "reasons": pl.get("reasons")})
         return {
-            "gate": gate.overview(),
+            "gate": ov,
+            "stopped": stopped,
             "desk": desk_status,
             "research_last_event": ({"type": research[-1]["type"], "ts": research[-1]["ts"]} if research else None),
             "overlays": overlay.active() if overlay is not None else [],
@@ -142,10 +193,11 @@ def create_app(
     def status_payload() -> Dict[str, Any]:
         snapshot = latest_snapshot()
         desk = getattr(orchestrator, "trading_desk", None)
+        mem = memory_obj()
         return {
             "status": "ONLINE",
             "timestamp": datetime.utcnow().isoformat(),
-            "mode": getattr(orchestrator, "current_mode", os.getenv("FIRM_MODE", "PAPER")),
+            "mode": getattr(orchestrator, "current_mode", None) or os.getenv("FIRM_MODE", "PAPER"),
             "llm_provider": os.getenv("LLM_PROVIDER", "ollama"),
             "llm_model": os.getenv("OLLAMA_MODEL" if os.getenv("LLM_PROVIDER", "ollama") == "ollama" else "ANTHROPIC_MODEL", ""),
             "balance": (snapshot or {}).get("balance"),
@@ -155,24 +207,75 @@ def create_app(
             "positions": (snapshot or {}).get("positions") or [],
             "open_positions": (snapshot or {}).get("open_positions"),
             "trading": {
-                "enabled": desk is not None,
-                "epics": list(getattr(desk, "epics", []) or []),
-                "resolution": getattr(desk, "resolution", None),
+                "enabled": desk is not None if orchestrator is not None else os.getenv("FIRM_TRADING", "1") != "0",
+                "epics": list(getattr(desk, "epics", []) or []) or whitelist(),
+                "resolution": getattr(desk, "resolution", None) or os.getenv("FIRM_TRADE_RESOLUTION", "HOUR"),
             },
+            "stream": (snapshot or {}).get("stream"),
+            "snapshot_ts": snapshot_ts(),
+            "today": today_payload(),
             "tasks": queue.count_by_status(),
-            "lessons_learned": (
-                getattr(getattr(orchestrator, "agent_runtime", None), "memory", None).count()
-                if getattr(getattr(orchestrator, "agent_runtime", None), "memory", None) is not None
-                else 0
-            ),
+            "lessons_learned": mem.count() if mem is not None else 0,
             "strategy": strategy_payload(),
-            "kill_switch_active": bool(getattr(getattr(orchestrator, "kill_switch", None), "is_active", False)),
-            "agents": [
-                {"name": c.name, "role": c.role}
-                for c in getattr(getattr(orchestrator, "agent_runtime", None), "active_agents", {}).values()
-                if c is not None
-            ],
+            "kill_switch_active": bool(getattr(getattr(orchestrator, "kill_switch", None), "is_active", False))
+            or HALT_FILE.exists(),
+            "agents": [{"name": c["name"], "role": c["role"]} for c in agent_configs()],
+            "alerts": alerts_payload(),
+            "promotion": last_payload("PROMOTION_CHECK"),
         }
+
+    def last_payload(event_type: str) -> Optional[Dict[str, Any]]:
+        ev = store.get_events(types=[event_type], last=1)
+        if not ev:
+            return None
+        try:
+            return dict(json.loads(ev[-1]["payload_json"]), ts=ev[-1]["ts"])
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    ALERT_TYPES = ["TRADING_HALTED", "STRATEGY_STOPPED", "STRATEGY_WARNING", "BROKER_OFFLINE", "DESK_IDLE",
+                   "RESEARCH_FAILED", "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "FLAG"]
+
+    def alerts_payload() -> List[Dict[str, Any]]:
+        """Alarm-Leiste: die letzten Warnungen der letzten 24 Stunden (echte Events)."""
+        since = (datetime.utcnow().replace(microsecond=0) - timedelta(hours=24)).isoformat()
+        out = []
+        for e in store.get_events(after_ts=since, types=ALERT_TYPES)[-12:]:
+            try:
+                pl = json.loads(e["payload_json"])
+            except (json.JSONDecodeError, TypeError):
+                pl = {}
+            if e["type"] == "FLAG" and pl.get("severity") == "info":
+                continue
+            text = pl.get("reason") or pl.get("message") or pl.get("error") or "; ".join(pl.get("reasons") or []) \
+                or pl.get("lesson") or ""
+            out.append({"id": e["id"], "ts": e["ts"], "type": e["type"], "agent": e.get("agent_id"),
+                        "text": str(text)[:200]})
+        return out
+
+    def snapshot_ts() -> Optional[str]:
+        snaps = store.get_events(types=["ACCOUNT_SNAPSHOT"], last=1)
+        return snaps[-1]["ts"] if snaps else None
+
+    def today_payload() -> Dict[str, Any]:
+        """Tages-PnL, Drawdown und Token-Verbrauch heute - alles aus echten Events (UTC-Tag)."""
+        from src.firm.agents.metrics import tokens_today
+        start = datetime.utcnow().strftime("%Y-%m-%dT00:00:00")
+        eq = []
+        for e in store.get_events(after_ts=start, types=["ACCOUNT_SNAPSHOT"]):
+            try:
+                v = json.loads(e["payload_json"]).get("equity")
+            except (json.JSONDecodeError, TypeError):
+                v = None
+            if isinstance(v, (int, float)):
+                eq.append(v)
+        peak, dd = (eq[0] if eq else None), 0.0
+        for v in eq:
+            peak = max(peak, v)
+            dd = max(dd, (peak - v) / peak if peak else 0.0)
+        return {"pnl": (eq[-1] - eq[0]) if len(eq) > 1 else None,
+                "drawdown_pct": dd * 100 if eq else None,
+                "tokens": tokens_today(store)}
 
     # ---------------- HTTP API ----------------
     @app.get("/health")
@@ -209,36 +312,34 @@ def create_app(
     @app.get("/api/agents", dependencies=[Depends(require_token)])
     async def get_agents():
         agents = []
-        memory = getattr(getattr(orchestrator, "agent_runtime", None), "memory", None)
-        from src.firm.agents.metrics import agent_metrics
+        memory = memory_obj()
+        from src.firm.agents.metrics import agent_metrics, tokens_today
         metrics = agent_metrics(store, days=7)
-        for c in getattr(getattr(orchestrator, "agent_runtime", None), "active_agents", {}).values():
-            if c is None:
-                continue
+        for c in agent_configs():
             agents.append({
-                "name": c.name,
-                "role": c.role,
-                "model": c.model,
-                "reporting_line": c.reporting_line,
-                "daily_token_budget": c.daily_token_budget,
-                "lessons_learned": memory.count(c.name) if memory is not None else 0,
-                "metrics_7d": metrics.get(c.name),
-                "actions": list(getattr(c, "actions", []) or []),
-                "triggers": list(getattr(c, "triggers", []) or []),
+                "name": c["name"],
+                "role": c["role"],
+                "model": c.get("model"),
+                "reporting_line": c.get("reporting_line"),
+                "daily_token_budget": c.get("daily_token_budget"),
+                "tools": list(c.get("tool_allowlist") or []),
+                "lessons_learned": memory.count(c["name"]) if memory is not None else 0,
+                "metrics_7d": metrics.get(c["name"]),
+                "tokens_today": tokens_today(store, c["name"]),
+                "actions": list(c.get("actions") or []),
+                "triggers": list(c.get("triggers") or []),
             })
         return {"agents": agents}
 
     @app.get("/api/lessons", dependencies=[Depends(require_token)])
     async def get_lessons(agent: Optional[str] = None, limit: int = 20):
         """What the agents have learned from their own work (advisory notes only)."""
-        memory = getattr(getattr(orchestrator, "agent_runtime", None), "memory", None)
-        if memory is None:
-            return {"lessons": []}
+        memory = memory_obj()
         if agent:
             return {"lessons": memory.recent(agent, limit=limit)}
         lessons = []
-        for name in getattr(getattr(orchestrator, "agent_runtime", None), "active_agents", {}):
-            lessons.extend(memory.recent(name, limit=limit))
+        for c in agent_configs():
+            lessons.extend(memory.recent(c["name"], limit=limit))
         return {"lessons": lessons}
 
     @app.get("/api/archive", dependencies=[Depends(require_token)])
@@ -294,9 +395,7 @@ def create_app(
 
     @app.post("/api/hire/{request_id}", dependencies=[Depends(require_token)])
     async def hire(request_id: str, decision: Dict[str, str]):
-        ceo = getattr(orchestrator, "ceo", None)
-        if ceo is None:
-            raise HTTPException(status_code=409, detail="CEO manager not available in this API process")
+        ceo = ceo_obj()
         choice = (decision.get("decision") or "").upper()
         try:
             if choice == "APPROVED":
@@ -309,9 +408,39 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(e))
         return {"request_id": request_id, "decision": choice}
 
+    def playbook_store():
+        from src.firm.agents.playbooks import PlaybookStore
+        return getattr(orchestrator, "playbooks", None) or PlaybookStore(store.db_path, event_store=store)
+
+    @app.get("/api/playbooks", dependencies=[Depends(require_token)])
+    async def playbooks(role: Optional[str] = None):
+        pbs = playbook_store()
+        roles = [role] if role else sorted(p.stem for p in Path("config/playbooks").glob("*.md"))
+        return {"active": {r: pbs.active(r) for r in roles}, "pending": pbs.pending()}
+
+    @app.post("/api/playbooks/{proposal_id}", dependencies=[Depends(require_token)])
+    async def decide_playbook(proposal_id: str, decision: Dict[str, str]):
+        choice = (decision.get("decision") or "").upper()
+        if choice not in ("APPROVED", "REJECTED"):
+            raise HTTPException(status_code=400, detail="decision must be APPROVED or REJECTED")
+        try:
+            row = playbook_store().decide(proposal_id, choice == "APPROVED")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        return {"id": proposal_id, "status": row["status"], "version": row.get("version")}
+
+    @app.delete("/api/lessons/{lesson_id}", dependencies=[Depends(require_token)])
+    async def delete_lesson(lesson_id: str):
+        from src.firm.agents.memory import LessonStore
+        memory = memory_obj()
+        if not memory.delete(lesson_id):
+            raise HTTPException(status_code=404, detail="lesson not found")
+        store.append("USER", "LESSON_DELETED", {"lesson_id": lesson_id})
+        return {"deleted": lesson_id}
+
     @app.get("/api/hiring", dependencies=[Depends(require_token)])
     async def hiring():
-        requests = getattr(getattr(orchestrator, "ceo", None), "hiring_requests", {}) or {}
+        requests = ceo_obj().hiring_requests
         return {"requests": [
             {
                 "request_id": r.request_id,
@@ -381,7 +510,7 @@ def create_app(
                             await orchestrator.kill_switch.activate()
                         await manager.broadcast({"type": "SYSTEM", "content": "KILL SWITCH activated."})
                     elif msg_type in ("APPROVE_HIRE", "REJECT_HIRE"):
-                        ceo = getattr(orchestrator, "ceo", None)
+                        ceo = ceo_obj()
                         request_id = msg.get("request_id")
                         if ceo is not None and request_id:
                             if msg_type == "APPROVE_HIRE":

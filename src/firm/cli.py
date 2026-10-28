@@ -8,11 +8,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from dotenv import load_dotenv
+from src.firm.envload import load_env
 
 from src.firm.main import FirmOrchestrator, HALT_FILE, env_secret
 
-load_dotenv()
+load_env()
 logging.basicConfig(level=logging.INFO, format='%(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("FirmCLI")
 
@@ -180,6 +180,26 @@ async def _doctor() -> int:
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+async def _run_zone(args) -> int:
+    """One isolated zone process (started by the supervisor)."""
+    import signal
+    if args.name == "api":
+        import uvicorn
+        from src.firm.api.main import create_app
+        server = uvicorn.Server(uvicorn.Config(create_app(), host=args.host, port=args.port, log_level="info"))
+        await server.serve()
+        return 0
+    if HALT_FILE.exists():
+        logger.error("Halt flag active - zone %s not started.", args.name)
+        return 0
+    orchestrator = FirmOrchestrator()
+    loop = asyncio.get_running_loop()
+    with contextlib.suppress(NotImplementedError):  # Windows: no signal handlers in asyncio
+        loop.add_signal_handler(signal.SIGTERM, lambda: setattr(orchestrator, "is_running", False))
+    await orchestrator.start(mode=args.mode, zones=(args.name,))
+    return 0
+
+
 async def main():
     parser = argparse.ArgumentParser(description="Autonomous Trading Firm CLI")
     subparsers = parser.add_subparsers(dest="command")
@@ -191,6 +211,15 @@ async def main():
     run_parser.add_argument("--host", default="127.0.0.1", help="Dashboard bind host")
     run_parser.add_argument("--port", type=int, default=8000, help="Dashboard port")
     run_parser.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch oeffnen")
+    run_parser.add_argument("--single", action="store_true",
+                            help="Alles in einem Prozess (ohne Prozesstrennung; z. B. zum Debuggen)")
+
+    # 'zone' - one isolated process, started by the supervisor
+    zone_parser = subparsers.add_parser("zone", help="(intern) eine isolierte Zone; startet der Supervisor")
+    zone_parser.add_argument("name", choices=["money", "brain", "api"])
+    zone_parser.add_argument("--mode", default=os.getenv("FIRM_MODE", "PAPER"))
+    zone_parser.add_argument("--host", default="127.0.0.1")
+    zone_parser.add_argument("--port", type=int, default=8000)
 
     # 'halt' / 'resume'
     subparsers.add_parser("halt", help="Emergency halt of all operations (kill switch + stop)")
@@ -231,7 +260,15 @@ async def main():
                 )
                 return 1
 
-        logger.info(f"Starting firm in {args.mode} mode...")
+        if not args.single:
+            from src.firm.supervisor import Supervisor
+            logger.info(f"Starting firm in {args.mode} mode as separate processes (money / brain / mcp / api)...")
+            sup = Supervisor(args.mode, args.dashboard, args.host, args.port, HALT_FILE)
+            if args.no_browser:
+                sup.base_env["FIRM_OPEN_BROWSER"] = "0"
+            return await sup.run()
+
+        logger.info(f"Starting firm in {args.mode} mode (single process)...")
         orchestrator = FirmOrchestrator()
 
         server = None
@@ -268,6 +305,9 @@ async def main():
                     with contextlib.suppress(asyncio.CancelledError, Exception):
                         await server_task
             await orchestrator.stop()
+
+    elif args.command == "zone":
+        return await _run_zone(args)
 
     elif args.command == "halt":
         HALT_FILE.write_text(datetime.utcnow().isoformat(), encoding="utf-8")

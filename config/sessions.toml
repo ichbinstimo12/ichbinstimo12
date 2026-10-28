@@ -1,0 +1,30 @@
+# Handelsfenster fuer Daytrading (alle Zeiten UTC).
+# entry_start_h .. entry_end_h: neue Einstiege erlaubt; flat_h: spaetestens dann wird glattgestellt
+# (keine Position ueber Nacht -> keine Uebernacht-Finanzierung, kein Gap-Risiko ueber Nacht).
+# ANNAHME: Zeiten fuer die Winterzeit gewaehlt; die liquideste Phase (London/New York) wird genutzt.
+
+[default]
+entry_start_h = 7.0
+entry_end_h = 19.0
+flat_h = 20.0
+
+[epic.EURUSD]
+entry_start_h = 7.0
+entry_end_h = 16.0
+flat_h = 19.5
+
+[epic.GOLD]
+entry_start_h = 8.0
+entry_end_h = 18.0
+flat_h = 20.0
+
+[epic.BTCUSD]
+entry_start_h = 8.0
+entry_end_h = 20.0
+flat_h = 21.0
+
+[epic.AAPL]
+# US-Kassasitzung 14:30-21:00 UTC (Winterzeit); erste halbe Stunde = Eroeffnungsspanne
+entry_start_h = 14.5
+entry_end_h = 19.5
+flat_h = 20.75

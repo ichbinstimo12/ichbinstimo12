@@ -7,6 +7,7 @@ Aktion, die Risiko erhoeht, eine Order sendet, Limits aendert oder eine Strategi
   block_entries    Neue Einstiege befristet sperren (z. B. vor einem Termin). Braucht eine Quelle.
   request_research Forschungslauf anstossen (der Orchestrator begrenzt die Haeufigkeit)
   flag             Hinweis/Alarm an CEO und Dashboard
+  propose_playbook Eigene Arbeitsanleitung aendern (Regel hinzufuegen/streichen); wirksam erst nach deiner Freigabe
   propose_hire     (nur CEO) Einstellungsantrag fuer eine vorhandene Rollen-Vorlage; wirksam erst nach Freigabe durch dich
 """
 from __future__ import annotations
@@ -15,7 +16,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-ACTION_TYPES = ("tighten_risk", "block_entries", "request_research", "flag", "propose_hire")
+ACTION_TYPES = ("tighten_risk", "block_entries", "request_research", "flag", "propose_hire", "propose_playbook")
 EPIC_RE = re.compile(r"^[A-Z0-9_.]{2,20}$|^\*$")
 
 
@@ -98,6 +99,15 @@ def validate_action(action: Any, allowed: List[str], whitelist: List[str]) -> Tu
 
     if kind == "request_research":
         return True, {"type": kind, "reason": reason}
+
+    if kind == "propose_playbook":
+        add = " ".join(str(action.get("add_rule") or "").split())[:300]
+        remove = " ".join(str(action.get("remove_rule") or "").split())[:300]
+        if not add and not remove:
+            return False, "propose_playbook: 'add_rule' oder 'remove_rule' fehlt"
+        if add and len(add) < 15:
+            return False, "propose_playbook: Regel zu kurz"
+        return True, {"type": kind, "add_rule": add or None, "remove_rule": remove or None, "reason": reason}
 
     if kind == "propose_hire":
         role = str(action.get("role") or "").strip()

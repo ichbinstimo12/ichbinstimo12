@@ -3,6 +3,7 @@ fastapi
 uvicorn[standard]
 pydantic>=2
 httpx
+websockets>=13    # Capital.com live price stream
 python-dotenv
 pyyaml
 anthropic>=2.3      # LLM provider (only used with LLM_PROVIDER=anthropic)

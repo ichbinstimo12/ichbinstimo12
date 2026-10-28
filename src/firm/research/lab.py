@@ -110,10 +110,38 @@ class Ind:
 
 
 # ------------------------------------------------------------------- Strategien
+def hour_utc(ts: float) -> float:
+    return (ts % 86400) / 3600.0
+
+
+def day_utc(ts: float) -> int:
+    return int(ts // 86400)
+
+
 @dataclass
 class Strategy:
     name: str = "base"
     max_bars: int = 0     # Zeit-Stop (0 = aus)
+    # Daytrading: Einstiege nur im Handelsfenster (UTC), spaetestens zur Glattstellungsstunde raus, nie ueber Nacht.
+    intraday: bool = False
+    entry_start_h: float = 7.0
+    entry_end_h: float = 19.0
+    flat_h: float = 20.0
+
+    def can_enter_at(self, ts: float) -> bool:
+        """Einstieg zum Zeitpunkt ts (Eroeffnung der Folgekerze) erlaubt?"""
+        if not self.intraday:
+            return True
+        h = hour_utc(ts)
+        return self.entry_start_h <= h < min(self.entry_end_h, self.flat_h)
+
+    def must_flat(self, entry_ts: float, ts: float) -> bool:
+        """Intraday-Position spaetestens zur Glattstellungsstunde bzw. bei Tageswechsel schliessen."""
+        return self.intraday and (day_utc(ts) != day_utc(entry_ts) or hour_utc(ts) >= self.flat_h)
+
+    def session(self) -> dict:
+        return dict(intraday=self.intraday, entry_start_h=self.entry_start_h, entry_end_h=self.entry_end_h,
+                    flat_h=self.flat_h) if self.intraday else {}
 
     def warmup(self) -> int: return 60
     def entry(self, ind: Ind, i: int):          # -> (side, stop_dist, tp_dist|None) | None
@@ -339,14 +367,139 @@ class MLLogit(Strategy):
         return dict(self.params(), weights=self.weights, bias=self.bias, mu=self.mu, sd=self.sd)
 
 
+
+# ----------------------------------------------------------- Daytrading-Familie
+def _session_start(ind: Ind, start_h: float):
+    """Index der ersten Kerze des UTC-Tages mit Stunde >= start_h (None, solange die Sitzung noch nicht begann)."""
+    def f():
+        out, cur_day, first = [], None, None
+        for i in range(ind.n):
+            ts = ind.k[i].get("ts") or 0
+            d = day_utc(ts)
+            if d != cur_day:
+                cur_day, first = d, None
+            if first is None and hour_utc(ts) >= start_h:
+                first = i
+            out.append(first)
+        return out
+    return ind._memo(("sess", start_h), f)
+
+
+def _session_mean(ind: Ind, start_h: float):
+    """Mittelwert der Schlusskurse seit Sitzungsbeginn (kausal, inkl. Kerze i)."""
+    def f():
+        st, out, acc, cnt, cur = _session_start(ind, start_h), [], 0.0, 0, None
+        for i in range(ind.n):
+            if st[i] is None:
+                out.append(None); continue
+            if st[i] != cur:
+                cur, acc, cnt = st[i], 0.0, 0
+            acc += ind.c[i]; cnt += 1
+            out.append(acc / cnt)
+        return out
+    return ind._memo(("smean", start_h), f)
+
+
+@dataclass
+class OpeningRangeBreakout(Strategy):
+    """Eroeffnungsspanne der Sitzung (erste `or_bars` Kerzen) wird gebrochen -> in Ausbruchsrichtung, Stop an der
+    Gegenseite der Spanne (mind. 1 ATR), Ziel tp_r x Risiko, spaetestens Glattstellung vor Sitzungsende.
+    Edge-These: Informationsverarbeitung zu Handelsbeginn setzt sich intraday fort. Gegenpartei: Range-Trader/Market-Maker."""
+    name: str = "orb"
+    or_bars: int = 4; tp_r: float = 2.0; intraday: bool = True
+
+    def warmup(self): return 60
+    def entry(self, ind, i):
+        st = _session_start(ind, self.entry_start_h)[i]
+        if st is None or i < st + self.or_bars:
+            return None
+        hi = max(ind.h[st:st + self.or_bars]); lo = min(ind.l[st:st + self.or_bars])
+        a, c = ind.atr(14)[i], ind.c[i]
+        if a <= 0 or hi <= lo:
+            return None
+        prev = ind.c[i - 1]
+        if c > hi and prev <= hi:
+            sd = max(c - lo, a)
+            return "BUY", sd, self.tp_r * sd
+        if c < lo and prev >= lo:
+            sd = max(hi - c, a)
+            return "SELL", sd, self.tp_r * sd
+        return None
+    def params(self): return dict(or_bars=self.or_bars, tp_r=self.tp_r)
+
+
+@dataclass
+class IntradayReversion(Strategy):
+    """Ueberdehnung gegen den Sitzungsmittelwert (> z ATR) mit RSI(2)-Extrem -> Rueckkehr zum Mittelwert, Stop k ATR.
+    Edge-These: kurzfristige Liquiditaetsstoesse werden intraday zurueckgenommen. Gegenpartei: getriebene Market-Orders."""
+    name: str = "intraday_reversion"
+    z: float = 2.0; stop_atr: float = 2.0; intraday: bool = True
+
+    def warmup(self): return 60
+    def entry(self, ind, i):
+        m = _session_mean(ind, self.entry_start_h)[i]
+        a, c, r = ind.atr(14)[i], ind.c[i], ind.rsi(2)[i]
+        if m is None or a <= 0:
+            return None
+        if c < m - self.z * a and r < 10:
+            return "BUY", self.stop_atr * a, (m - c)
+        if c > m + self.z * a and r > 90:
+            return "SELL", self.stop_atr * a, (c - m)
+        return None
+    def params(self): return dict(z=self.z, stop_atr=self.stop_atr)
+
+
+@dataclass
+class IntradayMomentum(Strategy):
+    """Starker Tagestrend seit Sitzungsbeginn (Bewegung > k ATR x Wurzel(Kerzen)) und Kurs ueber/unter EMA20 -> folgen,
+    Ausstieg bei Bruch der EMA20 oder Glattstellung. Edge-These: Intraday-Momentum (z. B. durch Rebalancing/Hedging)."""
+    name: str = "intraday_momentum"
+    k: float = 1.0; stop_atr: float = 2.0; intraday: bool = True
+
+    def warmup(self): return 60
+    def _dir(self, ind, i):
+        st = _session_start(ind, self.entry_start_h)[i]
+        a = ind.atr(14)[i]
+        if st is None or i - st < 4 or a <= 0:
+            return None
+        move, thr = ind.c[i] - ind.o[st], self.k * a * math.sqrt(i - st + 1)
+        e = ind.ema(20)[i]
+        if move > thr and ind.c[i] > e: return "BUY"
+        if move < -thr and ind.c[i] < e: return "SELL"
+        return None
+    def entry(self, ind, i):
+        d = self._dir(ind, i)
+        return (d, self.stop_atr * ind.atr(14)[i], None) if d else None
+    def exit(self, ind, i, side):
+        e = ind.ema(20)[i]
+        return ind.c[i] < e if side == "BUY" else ind.c[i] > e
+    def params(self): return dict(k=self.k, stop_atr=self.stop_atr)
+
+
 REGISTRY = {"ema_state": EmaState, "donchian_trend": DonchianTrend, "ts_momentum": TsMomentum, "rsi_reversion": RsiReversion,
-            "ml_logit": MLLogit}
+            "ml_logit": MLLogit, "orb": OpeningRangeBreakout, "intraday_reversion": IntradayReversion,
+            "intraday_momentum": IntradayMomentum}
+INTRADAY_ONLY = ("orb", "intraday_reversion", "intraday_momentum")
+SWING_SET = ("ema_state", "donchian_trend", "ts_momentum", "rsi_reversion", "ml_logit")
+DAYTRADE_SET = ("orb", "intraday_reversion", "intraday_momentum", "donchian_trend", "ml_logit")
+
+
+def is_intraday_resolution(resolution: str) -> bool:
+    return RES_SECONDS.get(resolution, 3600) < 3600
+
+
+def candidates_for(resolution: str):
+    """Unter einer Stunde wird Daytrading geprueft (alle Kandidaten glattgestellt vor Sitzungsende)."""
+    return list(DAYTRADE_SET if is_intraday_resolution(resolution) else SWING_SET)
 GRIDS = {
     "ema_state": {"stop_atr": [1.5, 2.5], "tp_atr": [3.0, 5.0]},
     "donchian_trend": {"entry_n": [24, 48, 96], "exit_n": [12, 24], "stop_atr": [2.5, 3.5]},
     "ts_momentum": {"lookback": [48, 96], "k": [0.5, 1.0], "stop_atr": [3.0]},
     "rsi_reversion": {"lo": [5.0, 10.0], "stop_atr": [2.5, 3.5]},
     "ml_logit": {"horizon": [12, 24], "k": [1.5, 2.5], "thr": [0.56, 0.60]},
+    "orb": {"or_bars": [2, 4], "tp_r": [1.5, 3.0]},
+    "intraday_reversion": {"z": [1.5, 2.5], "stop_atr": [1.5, 2.5]},
+    "intraday_momentum": {"k": [0.5, 1.0], "stop_atr": [1.5, 2.5]},
 }
 
 
@@ -368,7 +521,7 @@ def backtest(candles, strat: Strategy, cost_mult=1.0, slip_atr=0.03, spread_defa
     if first is not None and type(strat).prepare is not Strategy.prepare and not getattr(strat, "weights", None):
         strat.prepare(ind, first)
     n, warm = ind.n, max(strat.warmup(), first or 0)
-    fin = {"pct_day": overnight_pct_day * cost_mult, "bar_s": bar_seconds}
+    fin = {"pct_day": overnight_pct_day * cost_mult, "bar_s": bar_seconds, "ts": lambda j: candles[j]["ts"]}
     trades, pos = [], None
     atr = ind.atr(14)
 
@@ -395,12 +548,19 @@ def backtest(candles, strat: Strategy, cost_mult=1.0, slip_atr=0.03, spread_defa
                 pos = None
             else:
                 age = i - pos["i"]
+                if strat.must_flat(pos["ts"], nxt["ts"]):
+                    px = nxt["o"] - d * (half_spread(i + 1) + slip_atr * pos["atr"] * cost_mult)
+                    trades.append(_close(pos, px, i + 1, "flat", overnight_r_per_bar, fin))
+                    pos = None
+                    continue
                 if (strat.max_bars and age >= strat.max_bars) or strat.exit(ind, i, pos["side"]):
                     px = nxt["o"] - d * (half_spread(i + 1) + slip_atr * pos["atr"] * cost_mult)
                     trades.append(_close(pos, px, i + 1, "signal", overnight_r_per_bar, fin))
                     pos = None
                     continue
         if pos is None:
+            if strat.intraday and (not strat.can_enter_at(nxt["ts"]) or day_utc(nxt["ts"]) != day_utc(candles[i]["ts"])):
+                continue
             sig = strat.entry(ind, i)
             if sig:
                 side, sd, tp = sig
@@ -418,7 +578,9 @@ def _close(pos, px, i, why, ovn, fin=None):
     bars = max(0, i - pos["i"])
     r = d * (px - pos["entry"]) / pos["dist"] - ovn * bars
     if fin and fin["pct_day"] > 0 and bars:
-        nights = int(bars * fin["bar_s"] // 86400)  # ANNAHME: je volle 24 h Haltedauer eine Finanzierung
+        # ANNAHME: Finanzierung je gehaltenem UTC-Tageswechsel (Capital.com rechnet einmal pro Nacht ab)
+        nights = max(0, day_utc(fin["ts"](i)) - day_utc(pos["ts"])) if "ts" in fin else \
+            int(bars * fin["bar_s"] // 86400)
         r -= nights * fin["pct_day"] * pos["entry"] / pos["dist"]
     return {"r": r, "side": pos["side"], "bars": bars, "why": why, "ts": pos["ts"], "entry_i": pos["i"], "exit_i": i,
             "dist": pos["dist"], "entry": pos["entry"], "vol": pos.get("vol", 0.0)}
@@ -484,7 +646,7 @@ def required_t(trials: int, alpha=0.05) -> float:
 
 
 # ----------------------------------------------------------------- Walk-Forward
-def walk_forward(candles, name, n_folds=5, min_train_trades=12, cost_mult=1.0, **bt):
+def walk_forward(candles, name, n_folds=5, min_train_trades=12, cost_mult=1.0, base=None, **bt):
     """Expandierendes Training; Parameter je Fold NUR auf Trainingsdaten gewaehlt; Auswertung nur auf dem Folgeabschnitt."""
     pts, n = grid_points(name), len(candles)
     chunk = n // (n_folds + 1)
@@ -494,35 +656,36 @@ def walk_forward(candles, name, n_folds=5, min_train_trades=12, cost_mult=1.0, *
         best, best_e = None, -1e9
         for p in pts:
             trials += 1
-            s = REGISTRY[name](**p)
+            s = REGISTRY[name](**{**(base or {}), **p})
             m = metrics(backtest(candles[:tr_end], s, cost_mult, **bt))
             if m["trades"] >= min_train_trades and m["expectancy_r"] > best_e:
                 best, best_e = p, m["expectancy_r"]
         if best is None:
             folds.append({"fold": k, "params": None, "trades": 0}); continue
-        t = backtest(candles[:te_end], REGISTRY[name](**best), cost_mult, first=tr_end, **bt)
+        t = backtest(candles[:te_end], REGISTRY[name](**{**(base or {}), **best}), cost_mult, first=tr_end, **bt)
         oos += t
         folds.append({"fold": k, "params": best, "train_expectancy_r": best_e, "trades": len(t),
                       "oos_expectancy_r": metrics(t)["expectancy_r"]})
     return oos, folds, trials
 
 
-def research(epic, candles, names=None, trial_counter_in=0, min_oos_trades=40, **bt):
-    """Vollstaendige Pruefung aller Kandidaten fuer einen Markt. Rueckgabe: Liste Berichte (+ neue Gesamtzahl Versuche)."""
+def research(epic, candles, names=None, trial_counter_in=0, min_oos_trades=40, base=None, **bt):
+    """Vollstaendige Pruefung aller Kandidaten fuer einen Markt. Rueckgabe: Liste Berichte (+ neue Gesamtzahl Versuche).
+    `base`: Zusatzparameter fuer jeden Kandidaten (z. B. Sitzungsfenster fuer Daytrading)."""
     candles = normalize(candles)
-    names = names or list(REGISTRY)
+    names = names or list(SWING_SET)
     reports, total_trials = [], trial_counter_in
     for nm in names:
         rep = {"epic": epic, "strategy": nm, "bars": len(candles)}
         if len(candles) < 1500:
             rep.update(verdict="INSUFFICIENT_DATA", reasons=[f"nur {len(candles)} Kerzen (mind. 1500 noetig)"], trials=0)
             reports.append(rep); continue
-        oos, folds, trials = walk_forward(candles, nm, cost_mult=1.0, **bt)
-        oos2, _, trials2 = walk_forward(candles, nm, cost_mult=2.0, **bt)
+        oos, folds, trials = walk_forward(candles, nm, cost_mult=1.0, base=base, **bt)
+        oos2, _, trials2 = walk_forward(candles, nm, cost_mult=2.0, base=base, **bt)
         total_trials += trials + trials2
         m, m2 = metrics(oos), metrics(oos2)
         lo, hi = bootstrap_ci([t["r"] for t in oos])
-        full_pos = sum(1 for p in grid_points(nm) if metrics(backtest(candles, REGISTRY[nm](**p), **bt))["expectancy_r"] > 0)
+        full_pos = sum(1 for p in grid_points(nm) if metrics(backtest(candles, REGISTRY[nm](**{**(base or {}), **p}), **bt))["expectancy_r"] > 0)
         total_trials += len(grid_points(nm))
         nb = full_pos / len(grid_points(nm))
         need = required_t(total_trials)

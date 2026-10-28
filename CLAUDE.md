@@ -138,7 +138,8 @@ Lernen ist **messbar**: pro Agent Kennzahlen im Zeitverlauf (z. B. Anteil korrek
 **Umsetzungsstand (Code):** `src/firm/agents/memory.py` (`LessonStore`) + `AgentRuntime.step()`.
 Real: episodisch (Events), semantisch (Lessons mit `evidence_task_id`, `confidence`, `expires_at`, `applied_count`), Reflexionsschritt nach jeder Aufgabe, Injektion der Top-6-Lektionen in den Prompt, Harte Grenzen (max. 20/Agent, TTL 30 Tage, kein Lernen bei LLM-Ausfall, Lektionen sind nie ausführbar).
 Qualitätsmetriken je Agent: `src/firm/agents/metrics.py` (gültige Antworten, verworfene, Aktionen, Tokens, je Tag).
-Noch offen: prozedurale Playbooks mit Freigabe-Diff, Widerspruchserkennung.
+Prozedural: `src/firm/agents/playbooks.py` (versionierte Playbooks, Änderung nur per Vorschlag mit Diff und Freigabe durch den Operator).
+Widersprüche: `LessonStore` markiert widersprüchliche Lektionen gegenseitig (`contradicts`), nichts wird überschrieben.
 
 ## Expansion durch den Chef
 

@@ -186,6 +186,7 @@ class FakeBroker:
         }
 
     async def get_candles(self, epic, resolution="MINUTE_15", limit=200):
+        self.candle_requests = getattr(self, "candle_requests", []) + [resolution]
         return self.candles
 
     async def place_order(self, epic, side, size, stop_loss=None, take_profit=None):
@@ -508,3 +509,19 @@ async def test_stale_prices_are_not_traded(desk_env):
     desk = build_gated_desk(desk_env, broker)
     summary = await desk.run_cycle()
     assert broker.orders == [] and "veraltet" in summary["skipped"][0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_desk_uses_the_timeframe_the_research_chose(desk_env):
+    import json as _json
+    import time as _time
+    from src.firm.money.strategy_gate import StrategyGate
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_desk(desk_env, broker)
+    path = desk_env["tmp"] / "v15.json"
+    path.write_text(_json.dumps({"created": _time.time(), "resolution": ["MINUTE_15", "HOUR"], "verdicts": {
+        "BTCUSD": {"verdict": "PASS", "strategy": "donchian_trend", "resolution": "MINUTE_15",
+                   "params": {"entry_n": 24, "exit_n": 12, "stop_atr": 2.5}}}}))
+    desk.gate = StrategyGate(str(path))
+    await desk.run_cycle()
+    assert broker.candle_requests == ["MINUTE_15"]

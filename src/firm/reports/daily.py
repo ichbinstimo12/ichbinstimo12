@@ -69,6 +69,7 @@ class DailyReporter:
             "research": [e["type"] for e in events if e["type"].startswith("RESEARCH_")],
             "agents": {a: {k: m.get(k) for k in ("tasks", "valid_rate", "invalid", "actions", "tokens")}
                        for a, m in metrics.items()},
+            "promotion": next((_p(e) for e in reversed(self.event_store.get_events(types=["PROMOTION_CHECK"], last=1))), None),
             "note": "Kennzahlen eines Tages sagen nichts ueber einen Edge aus (zu wenige Trades).",
         }
         return report
@@ -87,6 +88,11 @@ class DailyReporter:
                   "|---|---|---|---|---|---|"]
         for a, m in sorted(r["agents"].items()):
             lines.append(f"| {a} | {m['tasks']} | {_fmt(m['valid_rate'])} | {m['invalid']} | {m['actions']} | {m['tokens']} |")
+        pr = r.get("promotion")
+        if pr:
+            lines += ["", f"## Skalierungs-Leiter {pr['stage']} -> {pr['next']}: {pr['passed']}/{pr['total']} Kriterien"
+                      + (" (bereit - Entscheidung liegt bei dir)" if pr.get("ready") else "")]
+            lines += [f"- [{'x' if c['ok'] else ' '}] {c['name']}: {c['detail']}" for c in pr["criteria"]]
         lines += ["", r["note"]]
         return "\n".join(lines)
 

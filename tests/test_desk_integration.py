@@ -36,13 +36,22 @@ def load_desk_module():
     class RiskGate:
         def check_account_health(self, *a): return True, ""
     rg.RiskGate = RiskGate
+    # Stubs only while the desk module is loaded; restore afterwards so other tests see the real modules.
+    saved = {m.__name__: sys.modules.get(m.__name__) for m in (es, gw, rg)}
     for m in (es, gw, rg):
         sys.modules[m.__name__] = m
     for pkg in ("src.firm.bus",):
         sys.modules.setdefault(pkg, types.ModuleType(pkg))
-    spec = importlib.util.spec_from_file_location("desk_under_test", ROOT / "src/firm/money/trading_desk.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    try:
+        spec = importlib.util.spec_from_file_location("desk_under_test", ROOT / "src/firm/money/trading_desk.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        for name, orig in saved.items():
+            if orig is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = orig
     return mod, EventStore, ExecutionGateway, RiskGate
 
 

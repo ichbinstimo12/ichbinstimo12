@@ -174,6 +174,39 @@ python -m src.firm resume   # erst nach Pruefung der Ursache
 Sicherheit: Im PAPER-Modus verweigert der Desk den Handel, wenn der Broker kein
 Demo-Host ist. LIVE braucht weiterhin den Approval-Token und ein PASS-Urteil.
 
+## 4b2. Prozesse, Daytrading, Freigaben (Stand Runde 3)
+
+Start (Standard = getrennte Prozesse):
+
+```bash
+python -m src.firm run --dashboard          # Supervisor: money | mcp | brain | api
+python -m src.firm run --dashboard --single # alles in einem Prozess (Debug)
+```
+
+| Prozess | Inhalt | Schluessel |
+|---|---|---|
+| money | Broker, Desk, RiskGate, Reconciler, Kill-Switch, Kursstream, Forschung, Berichte | Capital.com |
+| mcp | capitalcom-mcp (HTTP, 127.0.0.1), Trading serverseitig AUS | nur Demo |
+| brain | Agenten, Scheduler, LLM | nur LLM (liest keine .env) |
+| api | Dashboard | nur FIRM_API_TOKEN |
+
+Absturz: Prozess wird mit wachsender Pause neu gestartet; der money-Prozess 5x in 10 min -> Halt-Flag.
+
+Daytrading: Forschung auf `MINUTE_15` (Handelsfenster je Markt in `config/sessions.toml`, Glattstellung
+vor Sitzungsende, keine Position ueber Nacht) und `HOUR` (Swing). Je Markt handelt der Desk auf dem Zeitrahmen,
+den das Urteil nennt (Strategie-Wand im Dashboard).
+
+Freigaben im Dashboard (Panel FREIGABEN): Einstellungen, Playbook-Aenderungen (mit Diff). Lektionen kannst du im
+Mitarbeiter-Panel loeschen; widerspruechliche sind als UMSTRITTEN markiert.
+
+Skalierungs-Leiter: taegliche Pruefung PAPER -> LIVE_MICRO -> LIVE (Event `PROMOTION_CHECK`, Tagesbericht,
+Dashboard). Nur Empfehlung. LIVE_MICRO handelt mit halbem Risiko pro Trade. Den Schritt machst nur du:
+
+```bash
+python -m src.firm approve-live --duration 86400
+python -m src.firm run --dashboard --mode LIVE_MICRO   # nutzt CAPITAL_LIVE_* aus .env, nie die Demo-Schluessel
+```
+
 ## 4c. Archiv (Aktenschrank fuer Menschen und Agenten)
 
 Der Event-Store (SQLite) ist das unveraenderliche Protokoll, an dem der Code

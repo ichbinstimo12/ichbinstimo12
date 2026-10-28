@@ -36,6 +36,40 @@ def _normalize(text: str) -> str:
     return " ".join(text.lower().split())[:MAX_LESSON_CHARS]
 
 
+_POS = {"win", "wins", "won", "winning", "profitable", "profit", "works", "worked", "positive", "higher", "above",
+        "increase", "increases", "bullish", "succeeds", "succeeded", "helps", "helped", "better", "gains"}
+_NEG = {"lose", "loses", "lost", "losing", "unprofitable", "loss", "losses", "fails", "failed", "negative", "lower",
+        "below", "decrease", "decreases", "bearish", "hurts", "hurt", "worse", "rejected"}
+_NEGATORS = {"not", "never", "no", "dont", "doesnt", "didnt", "isnt", "wasnt"}
+_STOP = {"the", "and", "with", "when", "were", "was", "are", "for", "that", "this", "than", "from", "after", "before",
+         "during", "into", "over", "under", "trades", "trade", "entries"}
+
+
+def _tokens(text: str) -> List[str]:
+    return [w.strip(".,;:!?()\"'").replace("'", "") for w in text.lower().split()]
+
+
+def polarity(text: str) -> int:
+    """+1 positive claim, -1 negative claim, 0 neutral/mixed. A negator flips the sign."""
+    toks = _tokens(text)
+    pos, neg = any(t in _POS for t in toks), any(t in _NEG for t in toks)
+    if pos == neg:
+        return 0
+    sign = 1 if pos else -1
+    return -sign if any(t in _NEGATORS for t in toks) else sign
+
+
+def subject(text: str) -> set:
+    """Content words that identify what a lesson is about (market, strategy, condition)."""
+    return {t for t in _tokens(text) if len(t) > 3 and t not in _POS | _NEG | _NEGATORS | _STOP}
+
+
+def contradicts(a: str, b: str) -> bool:
+    """Same subject (>= 2 shared content words), opposite claim."""
+    pa, pb = polarity(a), polarity(b)
+    return pa != 0 and pb != 0 and pa != pb and len(subject(a) & subject(b)) >= 2
+
+
 class LessonStore:
     """
     Semantic memory of the Brain-Zone: what an agent learned from its own work.
@@ -64,6 +98,8 @@ class LessonStore:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(lessons)").fetchall()}
             if "expires_at" not in columns:
                 conn.execute("ALTER TABLE lessons ADD COLUMN expires_at TEXT")
+            if "contradicts" not in columns:
+                conn.execute("ALTER TABLE lessons ADD COLUMN contradicts TEXT")
             conn.commit()
         self.purge_expired()
 
@@ -112,6 +148,15 @@ class LessonStore:
         if not created:
             return None
 
+        # Widersprueche markieren statt ueberschreiben: beide Lektionen bleiben, beide tragen den Verweis.
+        conflicts = [l for l in self.recent(agent_id, limit=self.max_per_agent)
+                     if l["lesson_id"] != lesson_id and contradicts(text, l["lesson"])]
+        if conflicts:
+            with sqlite3.connect(self.db_path) as conn:
+                for other in conflicts:
+                    self._link(conn, lesson_id, other["lesson_id"])
+                    self._link(conn, other["lesson_id"], lesson_id)
+                conn.commit()
         self.prune(agent_id)
         logger.info(f"Agent {agent_id} learned: {text[:100]} (confidence {confidence:.2f})")
         return {
@@ -124,7 +169,16 @@ class LessonStore:
             "created_at": ts,
             "expires_at": expires_at,
             "applied_count": 0,
+            "contradicts": [c["lesson_id"] for c in conflicts],
         }
+
+    @staticmethod
+    def _link(conn, lesson_id: str, other_id: str) -> None:
+        row = conn.execute("SELECT contradicts FROM lessons WHERE lesson_id = ?", (lesson_id,)).fetchone()
+        ids = [i for i in ((row[0] if row else None) or "").split(",") if i]
+        if other_id not in ids:
+            ids.append(other_id)
+        conn.execute("UPDATE lessons SET contradicts = ? WHERE lesson_id = ?", (",".join(ids), lesson_id))
 
     def recent(self, agent_id: str, limit: int = 6) -> List[Dict[str, Any]]:
         """Highest-confidence, most recent, non-expired lessons for this agent."""
@@ -194,6 +248,17 @@ class LessonStore:
             else:
                 row = conn.execute("SELECT COUNT(*) FROM lessons").fetchone()
         return int(row[0]) if row else 0
+
+    def delete(self, lesson_id: str) -> bool:
+        """Operator removes a lesson (UI). References in other lessons are cleaned up."""
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute("DELETE FROM lessons WHERE lesson_id = ?", (lesson_id,))
+            for lid, refs in conn.execute("SELECT lesson_id, contradicts FROM lessons WHERE contradicts LIKE ?",
+                                          (f"%{lesson_id}%",)).fetchall():
+                ids = [i for i in (refs or "").split(",") if i and i != lesson_id]
+                conn.execute("UPDATE lessons SET contradicts = ? WHERE lesson_id = ?", (",".join(ids) or None, lid))
+            conn.commit()
+        return cur.rowcount > 0
 
     def all_for_agent(self, agent_id: str) -> List[Dict[str, Any]]:
         with sqlite3.connect(self.db_path) as conn:

@@ -4,7 +4,7 @@ daily_token_budget: 60000
 reporting_line: CEO
 schedule_hours: 0
 triggers: [RESEARCH_DONE, STRATEGY_WARNING]
-actions: [tighten_risk, flag]
+actions: [tighten_risk, flag, propose_playbook]
 tool_allowlist:
   - read_events
   - read_reports

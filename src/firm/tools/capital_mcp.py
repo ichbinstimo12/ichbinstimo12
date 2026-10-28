@@ -38,8 +38,8 @@ READ_ONLY_TOOLS: Dict[str, str] = {
 MAX_RESULT_CHARS = 4000
 
 
-def _env_secret(name: str) -> Optional[str]:
-    v = os.getenv(name)
+def _env_secret(name: str, env: Optional[Dict[str, str]] = None) -> Optional[str]:
+    v = (env if env is not None else os.environ).get(name)
     if not v or v.strip() in ("", "HIER_EINFUEGEN"):
         return None
     return v
@@ -59,13 +59,18 @@ class CapitalMCPTools:
         self._session = None
         self._lock = asyncio.Lock()
 
-    def _server_env(self) -> Optional[Dict[str, str]]:
-        key, ident, pw = (_env_secret("CAPITAL_API_KEY"), _env_secret("CAPITAL_IDENTIFIER"),
-                          _env_secret("CAPITAL_PASSWORD"))
+    def server_env(self, env: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
+        """Umgebung fuer den MCP-Server-Prozess (auch vom Supervisor fuer den HTTP-Betrieb benutzt)."""
+        return self._server_env(env)
+
+    def _server_env(self, base: Optional[Dict[str, str]] = None) -> Optional[Dict[str, str]]:
+        src = base if base is not None else os.environ
+        key, ident, pw = (_env_secret("CAPITAL_API_KEY", src), _env_secret("CAPITAL_IDENTIFIER", src),
+                          _env_secret("CAPITAL_PASSWORD", src))
         if not (key and ident and pw):
             return None
         env = {
-            "PATH": os.environ.get("PATH", ""),
+            "PATH": src.get("PATH", ""),
             "HOME": str(self.workdir.resolve()),
             "CAP_API_KEY": key, "CAP_IDENTIFIER": ident, "CAP_API_PASSWORD": pw,
             "CAP_ENV": "demo",              # Agenten sehen nie das Live-Konto
@@ -75,8 +80,8 @@ class CapitalMCPTools:
             "CAP_WS_ENABLED": "false",
         }
         for k in ("SYSTEMROOT", "TEMP", "TMP", "LANG"):  # Windows/Locale
-            if os.environ.get(k):
-                env[k] = os.environ[k]
+            if src.get(k):
+                env[k] = src[k]
         return env
 
     async def start(self) -> bool:
@@ -89,6 +94,10 @@ class CapitalMCPTools:
         except ImportError:
             self.reason = "Python-Paket 'mcp' fehlt (pip install -r requirements.txt)"
             return False
+        url = os.getenv("FIRM_MCP_URL")
+        if url:
+            # Getrennter Betrieb: Der Supervisor startet den Server mit den Demo-Schluesseln; dieser Prozess kennt sie nie.
+            return await self._connect_http(url, ClientSession)
         exe = shutil.which(self.command)
         if not exe:
             self.reason = f"MCP-Server '{self.command}' nicht gefunden (pip install capitalcom-mcp)"
@@ -110,6 +119,43 @@ class CapitalMCPTools:
             self.reason = f"MCP-Start fehlgeschlagen: {e}"
             logger.warning(self.reason)
             return False
+        return self._ready(stack, session, listed)
+
+    async def _connect_http(self, url: str, ClientSession, wait_s: float = 60.0) -> bool:
+        from urllib.parse import urlparse
+        from mcp.client.streamable_http import streamablehttp_client
+        # Wait until the server accepts connections (the supervisor starts it in parallel).
+        u = urlparse(url)
+        deadline = asyncio.get_running_loop().time() + wait_s
+        while True:
+            try:
+                _, w = await asyncio.wait_for(asyncio.open_connection(u.hostname, u.port), timeout=3)
+                w.close()
+                break
+            except (OSError, asyncio.TimeoutError):
+                if asyncio.get_running_loop().time() > deadline:
+                    self.reason = f"MCP-Server unter {url} antwortet nicht"
+                    return False
+                await asyncio.sleep(1)
+        stack = AsyncExitStack()
+        try:
+            read, write, _ = await stack.enter_async_context(streamablehttp_client(url, timeout=30))
+            session = await stack.enter_async_context(ClientSession(read, write))
+            await asyncio.wait_for(session.initialize(), timeout=30)
+            listed = await asyncio.wait_for(session.list_tools(), timeout=30)
+        except BaseException as e:  # anyio raises BaseExceptionGroup; a broken tool server must not kill the agents
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
+            try:
+                await stack.aclose()
+            except BaseException:
+                pass
+            self.reason = f"MCP-Server unter {url} nicht erreichbar: {type(e).__name__}"
+            logger.warning(self.reason)
+            return False
+        return self._ready(stack, session, listed)
+
+    def _ready(self, stack, session, listed) -> bool:
         server_tools = {t.name for t in listed.tools}
         self.tools = [t for t in READ_ONLY_TOOLS if t in server_tools]
         self._stack, self._session = stack, session
