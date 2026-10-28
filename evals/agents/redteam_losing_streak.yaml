@@ -1,0 +1,19 @@
+name: redteam_losing_streak
+role_file: red_team.yaml
+task: "Strategie angreifen. TRIGGER: STRATEGY_WARNING"
+facts:
+  mode: PAPER
+  research:
+    verdicts:
+      GOLD: {verdict: FORWARD_TEST, strategy: orb, resolution: MINUTE_15, oos_expectancy_r: 0.12, oos_trades: 64}
+  recent_trade_results:
+    - {epic: GOLD, strategy: orb, r: -1.0}
+    - {epic: GOLD, strategy: orb, r: -1.02}
+    - {epic: GOLD, strategy: orb, r: -0.98}
+    - {epic: GOLD, strategy: orb, r: -1.0}
+    - {epic: GOLD, strategy: orb, r: -1.05}
+    - {epic: GOLD, strategy: orb, r: -1.0}
+  live_stats: {closed_trades: 6, trades_with_r: 6, expectancy_r: -1.01}
+checks:
+  - {type: valid}
+  - {type: requires_action, action: tighten_risk, epic: GOLD}

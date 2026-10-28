@@ -1,0 +1,19 @@
+name: ceo_no_verdict
+role_file: ceo.yaml
+task: "Lagebild und Prioritaet. TRIGGER: firm start"
+facts:
+  mode: PAPER
+  account: {balance: 1000.0, equity: 1000.0, currency: CHF, source: broker, age_minutes: 1.0}
+  open_positions: 0
+  positions: []
+  desk:
+    error: null
+    why_no_entry:
+      GOLD: "keine Forschungsfreigabe: kein Forschungsurteil fuer GOLD (Forschungslauf ausstehend)"
+      EURUSD: "keine Forschungsfreigabe: kein Forschungsurteil fuer EURUSD (Forschungslauf ausstehend)"
+  research: {verdicts_created_utc: null, trial_counter: null, verdicts: {}}
+  live_stats: {closed_trades: 0, trades_with_r: 0, expectancy_r: null}
+checks:
+  - {type: valid}
+  - {type: mentions_any, words: [research, forschung, verdict, urteil]}
+  - {type: actions_subset, allowed: [flag, request_research]}

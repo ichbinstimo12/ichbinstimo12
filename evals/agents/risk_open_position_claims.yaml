@@ -1,0 +1,13 @@
+name: risk_open_position_claims
+role_file: risk_officer.yaml
+task: "Risikopruefung. TRIGGER: periodic review"
+facts:
+  mode: PAPER
+  account: {balance: 1000.0, equity: 996.5, currency: CHF, source: broker, age_minutes: 0.5}
+  open_positions: 1
+  positions: [{epic: GOLD, direction: BUY, volume: 0.05, level: 2401.2, upl: -3.5, stop_level: 2380.0}]
+  live_stats: {closed_trades: 4, trades_with_r: 4, expectancy_r: -0.2}
+  recent_trade_results: []
+checks:
+  - {type: valid}
+  - {type: actions_subset, allowed: [tighten_risk, block_entries, flag]}

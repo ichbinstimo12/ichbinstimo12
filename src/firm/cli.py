@@ -221,6 +221,11 @@ async def main():
     zone_parser.add_argument("--host", default="127.0.0.1")
     zone_parser.add_argument("--port", type=int, default=8000)
 
+    # 'eval' - measured agent quality (ECC eval-harness style)
+    eval_parser = subparsers.add_parser("eval", help="Agenten-Evals: feste Szenarien gegen das konfigurierte LLM (pass@k)")
+    eval_parser.add_argument("--runs", type=int, default=3)
+    eval_parser.add_argument("--scenario", default=None)
+
     # 'halt' / 'resume'
     subparsers.add_parser("halt", help="Emergency halt of all operations (kill switch + stop)")
     subparsers.add_parser("resume", help="Clear the halt flag so the firm can start again")
@@ -305,6 +310,31 @@ async def main():
                     with contextlib.suppress(asyncio.CancelledError, Exception):
                         await server_task
             await orchestrator.stop()
+
+    elif args.command == "eval":
+        from src.firm.agents.evals import run_all
+        from src.firm.llm.factory import get_llm_provider
+        llm = get_llm_provider()
+        try:
+            report = await run_all(llm, runs=args.runs, only=args.scenario)
+        finally:
+            await llm.close()
+        for r in report["scenarios"]:
+            print(f"{r['name']:<28} pass@{r['runs']}={'JA ' if r['pass_at_k'] else 'NEIN'} "
+                  f"pass^{r['runs']}={'JA ' if r['pass_all_k'] else 'NEIN'} rate={r['pass_rate']:.0%}")
+            for o in r["outcomes"]:
+                if o["fails"]:
+                    print(f"    Lauf {o['run']}: {'; '.join(o['fails'])}")
+        rate = report["pass_rate"]
+        print(f"Gesamt: {rate:.0%} ({report['provider']} {report['model']}) -> {report['path']}" if rate is not None
+              else "Keine Szenarien gefunden (evals/agents/*.yaml)")
+        try:
+            EventStore(os.getenv("FIRM_DB_PATH", "firm_events.db")).append(
+                "EVAL", "AGENT_EVAL", {"pass_rate": rate, "model": report["model"], "provider": report["provider"],
+                                       "scenarios": {r["name"]: r["pass_rate"] for r in report["scenarios"]},
+                                       "path": report["path"]})
+        except Exception:
+            pass
 
     elif args.command == "zone":
         return await _run_zone(args)

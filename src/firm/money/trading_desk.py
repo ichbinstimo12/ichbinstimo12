@@ -297,6 +297,9 @@ class TradingDesk:
         halt_file: Optional[str] = None,
         stream: Any = None,
         quote_max_age: float = 15.0,
+        fast_loss_pct: float = 0.01,
+        fast_loss_window_s: float = 3600.0,
+        max_avg_slippage_r: float = 0.3,
         max_api_errors: int = 10,
         api_error_window_s: float = 1800.0,
     ):
@@ -326,6 +329,10 @@ class TradingDesk:
         self._last_status_key: Optional[str] = None
         self.halt_file = Path(halt_file) if halt_file else None
         self.stream, self.quote_max_age = stream, quote_max_age
+        # Circuit breaker (ECC llm-trading-agent-security): fast equity loss -> pause new entries for one window.
+        self.fast_loss_pct, self.fast_loss_window_s = fast_loss_pct, fast_loss_window_s
+        self.max_avg_slippage_r = max_avg_slippage_r
+        self._equity_samples: List[Tuple[float, float]] = []
         self.max_api_errors, self.api_error_window_s = max_api_errors, api_error_window_s
         self._api_errors: List[float] = []
         self._api_halt_reported = False
@@ -434,6 +441,60 @@ class TradingDesk:
         if age > 3 * bar + bar:
             return f"Kursdaten veraltet (letzte Kerze vor {age / 60:.0f} min)"
         return None
+
+    def _circuit_breaker(self, equity: float) -> Optional[str]:
+        """Equity faellt innerhalb des Fensters um mehr als fast_loss_pct vom Hoch -> keine neuen Einstiege fuer ein Fenster.
+        Ausstiege und Stops laufen weiter. Ergaenzt Tagesverlust-/Drawdown-Limit (diese stellen glatt und halten an)."""
+        now = time.time()
+        until = float(self.state.data.get("breaker_until") or 0)
+        if now < until:
+            return f"Schnellbremse aktiv bis {datetime.utcfromtimestamp(until).strftime('%H:%M')} UTC (schneller Verlust)"
+        self._equity_samples = [(t, e) for t, e in self._equity_samples if now - t <= self.fast_loss_window_s]
+        self._equity_samples.append((now, equity))
+        high = max(e for _, e in self._equity_samples)
+        if high > 0 and (high - equity) / high >= self.fast_loss_pct:
+            self.state.data["breaker_until"] = now + self.fast_loss_window_s
+            self.state._save()
+            self._equity_samples = []
+            self.event_store.append("TRADING_DESK", "CIRCUIT_BREAKER", {
+                "reason": f"Equity {equity:.2f} liegt {(high - equity) / high:.2%} unter dem Hoch {high:.2f} "
+                          f"der letzten {self.fast_loss_window_s / 60:.0f} min",
+                "paused_minutes": self.fast_loss_window_s / 60})
+            return "Schnellbremse ausgeloest (schneller Verlust)"
+        return None
+
+    @staticmethod
+    def _broker_distance_problem(market: Dict[str, Any], entry: float, stop: float,
+                                 target: Optional[float]) -> Optional[str]:
+        """Pre-send check: the broker rejects stops/targets closer than its minimum distance (dealing rules).
+        ANNAHME: unit PERCENTAGE = Prozent vom Kurs, sonst Preiseinheiten."""
+        raw = market.get("min_stop_distance")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        if value <= 0:
+            return None
+        unit = str(market.get("min_stop_unit") or "").upper()
+        min_abs = entry * value / 100.0 if unit == "PERCENTAGE" else value
+        if abs(entry - stop) < min_abs:
+            return f"Stop-Abstand {abs(entry - stop):.6g} unter Broker-Minimum {min_abs:.6g}"
+        if target is not None and abs(target - entry) < min_abs:
+            return f"Ziel-Abstand {abs(target - entry):.6g} unter Broker-Minimum {min_abs:.6g}"
+        return None
+
+    def _record_slippage(self, epic: str, strategy: str, slip_r: float) -> None:
+        """Kill-Kriterium 'Slippage dauerhaft ueber Y' (Spezifikation): Schnitt der letzten 10 Fills > max -> STOP."""
+        key = f"{epic}:{strategy}"
+        hist = self.state.data.setdefault("slippage_r", {}).setdefault(key, [])
+        hist.append(round(slip_r, 4))
+        del hist[:-10]
+        if len(hist) >= 10 and sum(hist) / len(hist) > self.max_avg_slippage_r:
+            reasons = [f"Slippage im Schnitt {sum(hist) / len(hist):.2f} R ueber 10 Fills (> {self.max_avg_slippage_r} R)"]
+            self.state.data.setdefault("stopped", {})[key] = {
+                "at": time.time(), "verdict_created": self.gate.created(), "reasons": reasons}
+            self.event_store.append("TRADING_DESK", "STRATEGY_STOPPED", {"epic": epic, "strategy": strategy,
+                                                                        "status": "STOP", "reasons": reasons})
 
     def _api_error(self) -> None:
         self._api_errors.append(datetime.utcnow().timestamp())
@@ -572,6 +633,8 @@ class TradingDesk:
             logger.critical(f"Trading halted by account health: {health_reason}")
             return summary
 
+        breaker = self._circuit_breaker(equity)
+
         try:
             positions = await self.broker.get_positions()
         except Exception as e:
@@ -594,6 +657,9 @@ class TradingDesk:
         max_positions = int(self.limits["account"]["max_positions"])
 
         for epic in self.epics:
+            if breaker:
+                summary["skipped"].append({"epic": epic, "reason": breaker})
+                continue
             if len(positions) >= max_positions:
                 summary["skipped"].append({"epic": epic, "reason": "max positions reached"})
                 continue
@@ -712,6 +778,13 @@ class TradingDesk:
                 "atr": signal.atr, "strength": signal.strength,
             })
 
+            problem = self._broker_distance_problem(market, signal.entry, signal.stop_loss, signal.take_profit)
+            if problem:
+                self.event_store.append("TRADING_DESK", "TRADE_REJECTED", {
+                    "epic": epic, "side": signal.side, "size": size, "reason": problem, "stage": "pre-send"})
+                summary["skipped"].append({"epic": epic, "reason": problem})
+                continue
+
             proposal = TradeProposal(
                 epic=epic,
                 side=signal.side,
@@ -736,6 +809,19 @@ class TradingDesk:
             if result.get("status") == "FILLED":
                 self.state.mark_trade(epic, datetime.utcnow().timestamp())
                 self.rules.on_entry()
+                slip_r = None
+                try:
+                    fill = float(result.get("filled_price"))
+                    dist = abs(signal.entry - signal.stop_loss)
+                    if dist > 0:
+                        slip_r = (fill - signal.entry) / dist * (1 if signal.side == "BUY" else -1)
+                except (TypeError, ValueError):
+                    pass
+                if slip_r is not None:
+                    self.event_store.append("TRADING_DESK", "FILL_QUALITY", {
+                        "epic": epic, "side": signal.side, "signal_price": signal.entry,
+                        "fill_price": result.get("filled_price"), "slippage_r": round(slip_r, 4)})
+                    self._record_slippage(epic, strat, slip_r)
                 self.state.data.setdefault("pos_meta", {})[epic] = {
                     "side": signal.side, "strategy": strat, "params": params, "balance_at_entry": balance,
                     "risk": _risk, "lane": dec.get("lane") or why.split(" ")[0], "resolution": res,

@@ -287,10 +287,10 @@
     TASK_COMPLETED: "#34d399", TASK_FAILED: "#fb7185", ORDER_FILLED: "#a78bfa", SIGNAL: "#a78bfa", TRADE_REJECTED: "#fb7185",
     POSITION_CLOSED: "#2dd4bf", TRADE_RESULT: "#2dd4bf", TRADING_HALTED: "#ef4444", STRATEGY_STOPPED: "#ef4444",
     RESEARCH_STARTED: "#93c5fd", RESEARCH_DONE: "#34d399", RESEARCH_FAILED: "#fb7185", DESK_STATUS: "#607588",
-    RISK_TIGHTENED: "#fbbf24", AGENT_HIRED: "#34d399", PLAYBOOK_PROPOSED: "#93c5fd", LESSON_CONFLICT: "#fbbf24" };
+    RISK_TIGHTENED: "#fbbf24", INJECTION_SUSPECTED: "#ef4444", CIRCUIT_BREAKER: "#ef4444", FILL_QUALITY: "#2dd4bf", AGENT_HIRED: "#34d399", PLAYBOOK_PROPOSED: "#93c5fd", LESSON_CONFLICT: "#fbbf24" };
   const TRADE_TYPES = ["SIGNAL", "ORDER_FILLED", "TRADE_REJECTED", "POSITION_CLOSED", "TRADE_RESULT", "DESK_STATUS", "TRADING_HALTED", "STRATEGY_STOPPED"];
   const ALERT_TYPES = ["TRADING_HALTED", "STRATEGY_STOPPED", "STRATEGY_WARNING", "BROKER_OFFLINE", "DESK_IDLE", "RESEARCH_FAILED",
-    "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "ACTION_REJECTED"];
+    "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "ACTION_REJECTED", "INJECTION_SUSPECTED", "CIRCUIT_BREAKER"];
   const RESEARCH_TYPES = ["RESEARCH_STARTED", "RESEARCH_DONE", "RESEARCH_FAILED", "RESEARCH_REQUESTED"];
   const HIDDEN = ["ACCOUNT_SNAPSHOT"];
 
@@ -391,10 +391,17 @@
   function diffHtml(diff) {
     return esc(diff || "").split("\n").map((l) => l.startsWith("+") && !l.startsWith("+++") ? `<span class="add">${l}</span>` : l.startsWith("-") && !l.startsWith("---") ? `<span class="del">${l}</span>` : l).join("\n");
   }
+  function evalHtml() {
+    const ev = state.status && state.status.agent_eval;
+    if (!ev) return '<div class="approval"><b>Agenten-Eval</b><br><span class="muted">noch nicht gelaufen: python -m src.firm eval</span></div>';
+    const rows = Object.entries(ev.scenarios || {}).map(([k, v]) => `<span class="chip ${v >= 1 ? "on" : ""}">${esc(k)} ${Math.round(v * 100)}%</span>`).join("");
+    return `<div class="approval"><b>Agenten-Eval</b> · ${ev.pass_rate == null ? "—" : Math.round(ev.pass_rate * 100) + " %"} bestanden ·
+      <span class="muted">${esc(ev.provider)} ${esc(ev.model || "")} · ${esc(timeOf(ev.ts))}</span><br>${rows}</div>`;
+  }
   function ladderHtml() {
     const pr = state.status && state.status.promotion;
-    if (!pr) return '<div class="approval"><b>Skalierungs-Leiter</b><br><span class="muted">noch keine Prüfung (täglich, im Handelsprozess)</span></div>';
-    return `<div class="approval"><b>Skalierungs-Leiter ${esc(pr.stage)} → ${esc(pr.next)}</b> · ${pr.passed}/${pr.total} Kriterien
+    if (!pr) return evalHtml() + '<div class="approval"><b>Skalierungs-Leiter</b><br><span class="muted">noch keine Prüfung (täglich, im Handelsprozess)</span></div>';
+    return evalHtml() + `<div class="approval"><b>Skalierungs-Leiter ${esc(pr.stage)} → ${esc(pr.next)}</b> · ${pr.passed}/${pr.total} Kriterien
       ${pr.ready ? '<span class="up"> · bereit, Entscheidung liegt bei dir (approve-live)</span>' : ""}
       ${pr.criteria.map((c) => `<div class="${c.ok ? "up" : "muted"}">${c.ok ? "✔" : "○"} ${esc(c.name)} <span class="muted">· ${esc(short(c.detail, 140))}</span></div>`).join("")}
       <div class="muted" style="font-size:10px">${esc(pr.note || "")}</div></div>`;

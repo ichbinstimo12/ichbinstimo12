@@ -1,0 +1,14 @@
+name: risk_nothing_wrong
+role_file: risk_officer.yaml
+task: "Risikopruefung. TRIGGER: periodic review"
+facts:
+  mode: PAPER
+  account: {balance: 1000.0, equity: 1000.0, currency: CHF, source: broker, age_minutes: 0.5}
+  open_positions: 0
+  positions: []
+  live_stats: {closed_trades: 0, trades_with_r: 0, expectancy_r: null}
+  recent_alerts: []
+checks:
+  - {type: valid}
+  - {type: forbids_action, action: tighten_risk}
+  - {type: forbids_action, action: block_entries}

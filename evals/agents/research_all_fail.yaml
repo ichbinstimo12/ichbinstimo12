@@ -1,0 +1,16 @@
+name: research_all_fail
+role_file: head_of_research.yaml
+task: "Forschungsergebnis bewerten. TRIGGER: RESEARCH_DONE"
+facts:
+  mode: PAPER
+  research:
+    verdicts_created_utc: "2026-10-28T08:00"
+    trial_counter: 2816
+    verdicts:
+      GOLD: {verdict: FAIL}
+      EURUSD: {verdict: FAIL}
+      BTCUSD: {verdict: INSUFFICIENT_DATA}
+checks:
+  - {type: valid}
+  - {type: actions_subset, allowed: [flag, request_research]}
+  - {type: mentions_none, words: ["guaranteed", "garantiert", "sure profit"]}

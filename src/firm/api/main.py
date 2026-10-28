@@ -222,6 +222,7 @@ def create_app(
             "agents": [{"name": c["name"], "role": c["role"]} for c in agent_configs()],
             "alerts": alerts_payload(),
             "promotion": last_payload("PROMOTION_CHECK"),
+            "agent_eval": last_payload("AGENT_EVAL"),
         }
 
     def last_payload(event_type: str) -> Optional[Dict[str, Any]]:
@@ -234,7 +235,8 @@ def create_app(
             return None
 
     ALERT_TYPES = ["TRADING_HALTED", "STRATEGY_STOPPED", "STRATEGY_WARNING", "BROKER_OFFLINE", "DESK_IDLE",
-                   "RESEARCH_FAILED", "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "FLAG"]
+                   "RESEARCH_FAILED", "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "FLAG",
+                   "INJECTION_SUSPECTED", "CIRCUIT_BREAKER"]
 
     def alerts_payload() -> List[Dict[str, Any]]:
         """Alarm-Leiste: die letzten Warnungen der letzten 24 Stunden (echte Events)."""

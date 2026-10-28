@@ -193,6 +193,9 @@ class FirmOrchestrator:
                     halt_file=str(HALT_FILE),
                     stream=self.stream,
                     quote_max_age=float(os.getenv("FIRM_QUOTE_MAX_AGE", "15")),
+                    fast_loss_pct=float(os.getenv("FIRM_FAST_LOSS_PCT", "1.0")) / 100,
+                    fast_loss_window_s=float(os.getenv("FIRM_FAST_LOSS_MINUTES", "60")) * 60,
+                    max_avg_slippage_r=float(os.getenv("FIRM_MAX_AVG_SLIPPAGE_R", "0.3")),
                     max_api_errors=int(os.getenv("FIRM_MAX_API_ERRORS", "10")),
                     api_error_window_s=float(os.getenv("FIRM_API_ERROR_WINDOW_MIN", "30")) * 60,
                 )
