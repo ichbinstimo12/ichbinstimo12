@@ -38,9 +38,16 @@ class RiskGate:
         with open(self.whitelist_path, "rb") as f:
             return tomllib.load(f)
 
-    def validate(self, proposal: TradeProposal, account_balance: float, current_positions: int, current_price: Optional[float] = None) -> Tuple[bool, str]:
+    def validate(self, proposal: TradeProposal, account_balance: float, current_positions: int,
+                 current_price: Optional[float] = None, fx_to_account: float = 1.0) -> Tuple[bool, str]:
         """
         Validates a trade proposal. Returns (is_allowed, reason).
+
+        `fx_to_account` converts one unit of the instrument's quote currency
+        into account currency. The risk check must compare like with like:
+        stop distance x size is in quote currency (USD for BTCUSD/GOLD), the
+        budget is in account currency (CHF). Without the conversion every USD
+        trade on a CHF account was rejected as "risk too high".
         """
         # 1. Whitelist Check
         if proposal.epic not in self.whitelist.get("allowed_epics", []):
@@ -64,8 +71,11 @@ class RiskGate:
             return False, "Stop-Loss must be placed on the wrong side of the current price"
 
         # 4. Trade Risk Check (max_risk_per_trade of the account balance)
-        risk_amount = abs(current_price - proposal.stop_loss) * proposal.size
-        max_allowed_risk = account_balance * self.limits["trade"]["max_risk_per_trade"]
+        if not fx_to_account or fx_to_account <= 0:
+            return False, "Exchange rate to account currency unknown - trade rejected"
+        risk_amount = abs(current_price - proposal.stop_loss) * proposal.size * fx_to_account
+        # Tiny tolerance for rounding of stop levels sent to the broker.
+        max_allowed_risk = account_balance * self.limits["trade"]["max_risk_per_trade"] * 1.001
 
         if risk_amount > max_allowed_risk:
             return False, f"Risk too high: {risk_amount:.2f} exceeds limit {max_allowed_risk:.2f}"

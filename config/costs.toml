@@ -1,0 +1,22 @@
+# Kostenannahmen fuer das Forschungslabor (nur Backtest, nicht fuer Limits).
+#
+# Spreads kommen aus den echten historischen Kursen (Ask - Bid je Kerze).
+# Die Uebernacht-Finanzierung ist eine ANNAHME und muss gegen die Angaben in
+# der Capital.com-Plattform (Instrument -> "Overnight fee") geprueft werden.
+# Werte: Anteil des Preises pro gehaltenem Tag (0.0002 = 0.02 % pro Nacht).
+
+[default]
+overnight_pct_day = 0.0002
+slip_atr = 0.03
+
+[epic.BTCUSD]
+overnight_pct_day = 0.0006   # ANNAHME: Krypto-CFDs sind deutlich teurer zu halten
+
+[epic.EURUSD]
+overnight_pct_day = 0.0001   # ANNAHME
+
+[epic.GOLD]
+overnight_pct_day = 0.0002   # ANNAHME
+
+[epic.AAPL]
+overnight_pct_day = 0.0003   # ANNAHME

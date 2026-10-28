@@ -21,10 +21,33 @@ async def test_broker_client_init():
 
 
 @pytest.mark.asyncio
-async def test_unauthenticated_call_raises_error():
-    client = CapitalComClient("test_key", "test_id", "test_pass")
-    with pytest.raises(ConnectionError, match="No active session"):
+async def test_call_without_session_logs_in_first_and_surfaces_auth_errors():
+    """No session -> the client logs in by itself (recovery after a failed start); a bad login raises."""
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.path)
+        return httpx.Response(401, json={"errorCode": "error.invalid.api.key"})
+
+    client = make_client(handler)
+    with pytest.raises(ConnectionError, match="authentication failed"):
         await client.get_account_details()
+    assert seen == ["/api/v1/session"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_get_positions_raises_instead_of_reporting_flat():
+    """An API error must never look like an empty book (reconciler/kill switch would act on it)."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/session"):
+            return httpx.Response(200, headers={"CST": "c", "X-SECURITY-TOKEN": "t"}, json={})
+        return httpx.Response(500, json={"errorCode": "error.internal"})
+
+    client = make_client(handler)
+    await client.authenticate()
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.get_positions()
     await client.close()
 
 

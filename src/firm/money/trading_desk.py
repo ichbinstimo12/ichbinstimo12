@@ -27,7 +27,7 @@ from src.firm.money.risk_gate import RiskGate
 from src.firm.money.signal_v2 import SignalEngineV2
 from src.firm.money.sizing import size_position_v2
 from src.firm.money.strategy_gate import StrategyGate
-from src.firm.money.journal import DeskRules
+from src.firm.money.journal import DeskRules, StrategyHealth
 from src.firm.research.lab import RES_SECONDS
 
 logging.basicConfig(level=logging.INFO)
@@ -289,6 +289,8 @@ class TradingDesk:
         archive: Any = None,
         gate: Optional[StrategyGate] = None,
         rules: Optional[DeskRules] = None,
+        overlay: Any = None,
+        health: Optional[StrategyHealth] = None,
     ):
         self.broker = broker
         self.gateway = gateway
@@ -310,6 +312,10 @@ class TradingDesk:
         self._engines: Dict[str, SignalEngineV2] = {}
         self._fx_cache: Dict[str, Tuple[float, float]] = {}
         self.archive = archive
+        self.overlay = overlay
+        self.health = health or StrategyHealth()
+        self.last_summary: Dict[str, Any] = {}
+        self._last_status_key: Optional[str] = None
 
         import tomllib
         with open(whitelist_path, "rb") as f:
@@ -321,7 +327,7 @@ class TradingDesk:
 
     # ------------------------------------------------------------- v2 helpers
     def _engine_for(self, strategy: str, params: Optional[dict]) -> SignalEngineV2:
-        key = f"{strategy}:{sorted((params or {}).items())}"
+        key = f"{strategy}:{json.dumps(params or {}, sort_keys=True)}"
         if key not in self._engines:
             self._engines[key] = SignalEngineV2(strategy, params or {}, resolution=self.resolution)
         return self._engines[key]
@@ -361,12 +367,55 @@ class TradingDesk:
             if epic not in open_epics:
                 m = meta.pop(epic)
                 pnl = balance - float(m.get("balance_at_entry") or balance)
+                risk = float(m.get("risk") or 0.0)
+                r_mult = pnl / risk if risk > 0 else None
                 self.rules.on_close(epic, m.get("side", ""), pnl)
                 self.event_store.append("TRADING_DESK", "TRADE_RESULT", {
-                    "epic": epic, "side": m.get("side"), "strategy": m.get("strategy"), "pnl": pnl,
-                    "balance_after": balance, "note": "Schliessung durch Broker (Stop/Ziel) oder Strategie"})
+                    "epic": epic, "side": m.get("side"), "strategy": m.get("strategy"), "pnl": pnl, "r": r_mult,
+                    "risk": risk or None, "lane": m.get("lane"), "balance_after": balance,
+                    "exact": len(meta) == 0,
+                    "note": "P&L = Kontostand jetzt - Kontostand bei Einstieg (exakt, wenn keine andere Position offen war)"})
+                self._record_result(epic, m.get("strategy"), r_mult)
         self._save_rules()
         self.state._save()
+
+    def _record_result(self, epic: str, strategy: Optional[str], r_mult: Optional[float]) -> None:
+        """Kill-Kriterien je Markt+Strategie auf echten Live-R-Werten. STOP sperrt den Markt bis zum naechsten Urteil."""
+        if r_mult is None or not strategy:
+            return
+        key = f"{epic}:{strategy}"
+        hist = self.state.data.setdefault("results_r", {}).setdefault(key, [])
+        hist.append(round(r_mult, 4))
+        check = self.health.check(hist)
+        if check["status"] == "STOP":
+            self.state.data.setdefault("stopped", {})[key] = {
+                "at": datetime.utcnow().timestamp(), "verdict_created": self.gate.created(), "reasons": check["reasons"]}
+            self.event_store.append("TRADING_DESK", "STRATEGY_STOPPED", {"epic": epic, "strategy": strategy, **check})
+            logger.critical(f"Kill-Kriterium: {key} gestoppt ({'; '.join(check['reasons'])})")
+        elif check["status"] == "WARN":
+            self.event_store.append("TRADING_DESK", "STRATEGY_WARNING", {"epic": epic, "strategy": strategy, **check})
+
+    def _stopped(self, epic: str, strategy: str) -> Optional[str]:
+        """Gestoppte Strategie bleibt gesperrt, bis ein NEUERES Forschungsurteil vorliegt (nur sperren, nie freischalten)."""
+        s = (self.state.data.get("stopped") or {}).get(f"{epic}:{strategy}")
+        if not s:
+            return None
+        if self.gate.created() > float(s.get("verdict_created") or 0):
+            self.state.data["stopped"].pop(f"{epic}:{strategy}", None)
+            self.state.data.get("results_r", {}).pop(f"{epic}:{strategy}", None)
+            self.state._save()
+            return None
+        return "Kill-Kriterium aktiv: " + "; ".join(s.get("reasons") or [])
+
+    def _publish_status(self, summary: Dict[str, Any]) -> None:
+        """DESK_STATUS nur bei Aenderung der Gruende: Agenten und Dashboard sehen, WARUM nicht gehandelt wird."""
+        reasons = {s.get("epic"): s.get("reason") for s in summary.get("skipped", [])}
+        key = json.dumps([summary.get("error"), reasons], sort_keys=True, default=str)
+        self.last_summary = {"ts": datetime.utcnow().isoformat(), "error": summary.get("error"), "reasons": reasons,
+                             "trades": len(summary.get("trades", [])), "closed": len(summary.get("closed", []))}
+        if key != self._last_status_key:
+            self._last_status_key = key
+            self.event_store.append("TRADING_DESK", "DESK_STATUS", self.last_summary)
 
     def _archive(self, kind: str, payload: Dict[str, Any]) -> None:
         """File the trade event. Archiving must never break execution."""
@@ -397,6 +446,14 @@ class TradingDesk:
     # -------------------------------------------------------------- cycle
     async def run_cycle(self) -> Dict[str, Any]:
         """One full scan: manage exits, then look for new entries."""
+        summary = await self._run_cycle()
+        try:
+            self._publish_status(summary)
+        except Exception as e:
+            logger.warning(f"Desk status not published: {e}")
+        return summary
+
+    async def _run_cycle(self) -> Dict[str, Any]:
         summary: Dict[str, Any] = {"trades": [], "skipped": [], "closed": [], "error": None}
 
         blocked = self.trading_blocked()
@@ -471,10 +528,22 @@ class TradingDesk:
                 continue
 
             is_demo = bool(getattr(self.broker, "is_demo", True))
-            ok, strat, params, risk_factor, why = self.gate.decision(epic, is_demo)
+            ok, strat, params, risk_factor, why = self.gate.decision(epic, is_demo, self.mode, self.resolution)
             if not ok:
-                summary["skipped"].append({"epic": epic, "reason": f"kein Forschungsfreigabe: {why}"})
+                summary["skipped"].append({"epic": epic, "reason": f"keine Forschungsfreigabe: {why}"})
                 continue
+            stopped = self._stopped(epic, strat)
+            if stopped:
+                summary["skipped"].append({"epic": epic, "reason": stopped})
+                continue
+            if self.overlay is not None:
+                o_factor, o_why = self.overlay.factor(epic)
+                if o_factor <= 0:
+                    summary["skipped"].append({"epic": epic, "reason": f"Einstiege gesperrt ({o_why})"})
+                    continue
+                if o_factor < 1:
+                    risk_factor *= o_factor
+                    why = f"{why}; Risiko x{o_factor:.2f} ({o_why})"
             engine = self.engine or self._engine_for(strat, params)
             candles = await self.broker.get_candles(epic, self.resolution, self.lookback)
             signal = engine.evaluate(epic, candles, market.get("bid"), market.get("ask"))
@@ -543,13 +612,15 @@ class TradingDesk:
                 account_balance=balance,
                 current_positions=len(positions),
                 current_price=signal.entry,
+                fx_to_account=fx,
             )
 
             if result.get("status") == "FILLED":
                 self.state.mark_trade(epic, datetime.utcnow().timestamp())
                 self.rules.on_entry()
                 self.state.data.setdefault("pos_meta", {})[epic] = {
-                    "side": signal.side, "strategy": strat, "balance_at_entry": balance}
+                    "side": signal.side, "strategy": strat, "params": params, "balance_at_entry": balance,
+                    "risk": _risk, "lane": why.split(" ")[0], "opened_ts": datetime.utcnow().timestamp()}
                 self._save_rules()
                 position_deal = await self._resolve_position_deal(epic, signal.side, known_deals)
                 if position_deal:
@@ -661,8 +732,9 @@ class TradingDesk:
             strat = meta.get("strategy")
             if not strat:
                 continue
-            engine = self.engine or self._engine_for(strat, None)
-            if not engine.should_exit(epic, candles, direction):
+            # Dieselben Parameter wie beim Einstieg (vorher: Standardparameter -> andere Exit-Kanaele als getestet).
+            engine = self.engine or self._engine_for(strat, meta.get("params"))
+            if not engine.should_exit(epic, candles, direction, meta.get("opened_ts")):
                 continue
             class _Reason:  # kleine Huelle, damit der Rest der Funktion unveraendert bleibt
                 reason = f"{strat}: Ausstiegsregel ausgeloest"

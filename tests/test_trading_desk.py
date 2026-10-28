@@ -162,7 +162,8 @@ class FakeBroker:
 
     is_demo = True
 
-    def __init__(self, candles, status="TRADEABLE", positions=None, balance=1000.0):
+    def __init__(self, candles, status="TRADEABLE", positions=None, balance=1000.0, currency="CHF"):
+        self.currency = currency
         self.candles = candles
         self.status = status
         self.positions = list(positions or [])
@@ -177,8 +178,10 @@ class FakeBroker:
         return list(self.positions)
 
     async def get_market_details(self, epic):
+        if epic == "USDCHF":
+            return {"epic": epic, "status": "TRADEABLE", "bid": 0.7999, "ask": 0.8001, "currency": "CHF"}
         return {
-            "epic": epic, "status": self.status, "bid": 180.0, "ask": 180.5,
+            "epic": epic, "status": self.status, "bid": 180.45, "ask": 180.5, "currency": self.currency,
             "min_size": 0.0001, "max_size": 50, "size_step": 0.0001,
         }
 
@@ -226,14 +229,55 @@ def build_desk(env, broker, mode="PAPER"):
     )
 
 
+def hourly_candles(closes, open_bar_close=None):
+    """Hourly candles with real UTC timestamps; the last one in `closes` is the newest CLOSED bar."""
+    import time as _time
+    from datetime import datetime, timezone
+    floor_now = int(_time.time() // 3600 * 3600)
+    base = floor_now - len(closes) * 3600
+    out = []
+    series = list(closes) + ([open_bar_close] if open_bar_close is not None else [])
+    for i, c in enumerate(series):
+        ts = datetime.fromtimestamp(base + i * 3600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        out.append({"t": ts, "open": c, "high": c + 0.3, "low": c - 0.3, "close": c, "volume": 1})
+    return out
+
+
+def breakout_closes(n=300, last=103.0):
+    closes = [100.0 + 0.5 * ((-1) ** i) for i in range(n - 1)]
+    return closes + [last]
+
+
+def write_verdict(env, verdict="PASS", strategy="donchian_trend", explore=False, resolution="HOUR"):
+    import json as _json
+    import time as _time
+    entry = {"verdict": verdict, "strategy": strategy, "params": {"entry_n": 24, "exit_n": 12, "stop_atr": 2.5},
+             "reasons": [], "oos_expectancy_r": 0.2, "oos_trades": 60}
+    if explore:
+        entry = {"verdict": "FAIL", "reasons": ["not significant"],
+                 "explore": {"strategy": strategy, "params": entry["params"], "oos_expectancy_r": 0.05, "oos_trades": 40}}
+    path = env["tmp"] / "verdicts.json"
+    path.write_text(_json.dumps({"created": _time.time(), "resolution": resolution, "trials": 10,
+                                 "verdicts": {"BTCUSD": entry}}))
+    return path
+
+
+def build_gated_desk(env, broker, mode="PAPER", **verdict):
+    from src.firm.money.strategy_gate import StrategyGate
+    desk = build_desk(env, broker, mode=mode)
+    desk.gate = StrategyGate(str(write_verdict(env, **verdict)))
+    desk.resolution = "HOUR"
+    return desk
+
+
 @pytest.mark.asyncio
 async def test_desk_executes_a_real_signal(desk_env):
-    broker = FakeBroker(make_candles(uptrend()))
-    desk = build_desk(desk_env, broker)
+    broker = FakeBroker(hourly_candles(breakout_closes(), open_bar_close=150.0))
+    desk = build_gated_desk(desk_env, broker)
 
     summary = await desk.run_cycle()
 
-    assert len(broker.orders) == 1
+    assert len(broker.orders) == 1, summary
     order = broker.orders[0]
     assert order["side"] == "BUY"
     assert order["size"] > 0
@@ -241,8 +285,80 @@ async def test_desk_executes_a_real_signal(desk_env):
     assert summary["trades"][0]["order_id"] == "DEAL-1"
 
     types = [e["type"] for e in desk_env["store"].get_events()]
-    assert "SIGNAL" in types
-    assert "ORDER_FILLED" in types
+    assert "SIGNAL" in types and "ORDER_FILLED" in types and "DESK_STATUS" in types
+    meta = desk.state.data["pos_meta"]["BTCUSD"]
+    assert meta["params"]["entry_n"] == 24 and meta["risk"] > 0
+
+
+@pytest.mark.asyncio
+async def test_desk_without_verdict_does_not_trade_and_says_why(desk_env):
+    from src.firm.money.strategy_gate import StrategyGate
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_desk(desk_env, broker)
+    desk.gate = StrategyGate(str(desk_env["tmp"] / "missing.json"))
+    summary = await desk.run_cycle()
+    assert broker.orders == []
+    assert "Forschungsurteil" in summary["skipped"][0]["reason"]
+    status = [e for e in desk_env["store"].get_events() if e["type"] == "DESK_STATUS"]
+    assert len(status) == 1
+    await desk.run_cycle()
+    assert len([e for e in desk_env["store"].get_events() if e["type"] == "DESK_STATUS"]) == 1, "only on change"
+
+
+@pytest.mark.asyncio
+async def test_usd_instrument_on_chf_account_is_not_rejected_by_the_risk_gate(desk_env):
+    """Regression: risk was compared in USD against a CHF budget -> every USD trade 'risk too high'."""
+    broker = FakeBroker(hourly_candles(breakout_closes()), currency="USD")
+    desk = build_gated_desk(desk_env, broker)
+    summary = await desk.run_cycle()
+    assert len(broker.orders) == 1, summary
+    order = broker.orders[0]
+    risk_chf = abs(180.5 - order["stop_loss"]) * order["size"] * 0.8
+    assert risk_chf <= 1000 * 0.005 * 1.001
+
+
+@pytest.mark.asyncio
+async def test_resolution_mismatch_blocks_trading(desk_env):
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker, resolution="DAY")
+    summary = await desk.run_cycle()
+    assert broker.orders == []
+    assert "FIRM_TRADE_RESOLUTION" in summary["skipped"][0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_explore_lane_trades_small_in_demo_only(desk_env, monkeypatch):
+    monkeypatch.setenv("FIRM_DEMO_EXPLORE", "1")
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker, explore=True)
+    await desk.run_cycle()
+    assert len(broker.orders) == 1
+    explore_size = broker.orders[0]["size"]
+
+    broker2 = FakeBroker(hourly_candles(breakout_closes()))
+    desk2 = build_gated_desk(desk_env, broker2)
+    desk2.state.data = {}
+    await desk2.run_cycle()
+    assert explore_size == pytest.approx(broker2.orders[0]["size"] * 0.25, rel=0.01)
+
+    monkeypatch.setenv("FIRM_DEMO_EXPLORE", "0")
+    broker3 = FakeBroker(hourly_candles(breakout_closes()))
+    desk3 = build_gated_desk(desk_env, broker3, explore=True)
+    desk3.state.data = {}
+    await desk3.run_cycle()
+    assert broker3.orders == []
+
+
+@pytest.mark.asyncio
+async def test_agent_overlay_can_block_and_shrink_but_never_grow(desk_env):
+    from src.firm.money.risk_overlay import RiskOverlay
+    overlay = RiskOverlay(desk_env["store"].db_path, desk_env["store"])
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker)
+    desk.overlay = overlay
+    overlay.tighten("BTCUSD", 0.0, 2, "MacroAnalyst", "exchange maintenance announced", source="cap_market_get")
+    summary = await desk.run_cycle()
+    assert broker.orders == [] and "gesperrt" in summary["skipped"][0]["reason"]
 
 
 @pytest.mark.asyncio
@@ -285,12 +401,15 @@ async def test_desk_does_not_double_up_on_an_open_epic(desk_env):
 
 
 @pytest.mark.asyncio
-async def test_desk_closes_a_position_when_the_trend_flips(desk_env):
+async def test_desk_closes_a_position_with_the_entry_parameters(desk_env):
+    """Exit uses the strategy AND parameters stored at entry (before: default parameters)."""
     broker = FakeBroker(
-        make_candles(downtrend()),
+        hourly_candles(breakout_closes(last=97.0)),
         positions=[{"dealId": "OLD", "epic": "BTCUSD", "direction": "BUY"}],
     )
-    desk = build_desk(desk_env, broker)
+    desk = build_gated_desk(desk_env, broker)
+    desk.state.data["pos_meta"] = {"BTCUSD": {"side": "BUY", "strategy": "donchian_trend", "balance_at_entry": 1000,
+                                              "params": {"entry_n": 24, "exit_n": 12, "stop_atr": 2.5}}}
 
     summary = await desk.run_cycle()
 

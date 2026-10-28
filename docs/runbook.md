@@ -121,37 +121,49 @@ Noch **nicht** implementiert (bewusst, aus dem Master-Prompt): versionierte
 Playbooks mit Freigabe-Diff, automatische Widerspruchserkennung, Qualitäts-
 Kennzahlen pro Agent. Diese brauchen echte Bewertungsdaten, keine Schätzwerte.
 
-## 4b. Handels-Desk (deterministisch, ohne LLM)
+## 4b. Handels-Desk, Forschung und Agenten (Stand Audit 2026-10)
 
-Der LLM-Agent analysiert und lernt, aber er **handelt nicht**. Orders entstehen
-ausschliesslich im `TradingDesk` (`src/firm/money/trading_desk.py`):
+Ablauf ohne Handarbeit:
 
 ```
-Kerzen -> Signal -> Positionsgroesse -> RiskGate -> ExecutionGateway -> Broker
+Start -> Broker-Login (Retry, kein stiller Mock) -> Forschungslauf, falls kein Urteil < 7 Tage
+      -> data/strategy_verdicts.json -> Strategie-Tor -> Desk (jede abgeschlossene Kerze)
+      -> RiskGate (mit Waehrungsumrechnung) -> ExecutionGateway -> Broker
 ```
 
-- **Signal:** EMA12/EMA48-Crossover, gefiltert mit `|EMA-Gap| >= 0.25 * ATR14`.
-  Stop = 1.5 ATR, Ziel = 3 ATR (2:1). In Seitwaertsphasen wird nicht gehandelt.
-- **Groesse:** `balance * max_risk_per_trade / Stop-Distanz`, abgerundet auf den
-  echten Broker-Increment, begrenzt durch Broker-Min/Max und `max_leverage`.
-- **Ausstieg:** dreht der Trend gegen die Position, wird sie geschlossen.
-- **Symbole:** aus `config/whitelist.toml` (BTCUSD, EURUSD, GOLD, AAPL).
-  Geschlossene Maerkte werden uebersprungen (Status kommt live vom Broker).
-- Jede Entscheidung landet als `SIGNAL`, `ORDER_FILLED`, `TRADE_REJECTED`,
-  `POSITION_CLOSED` oder `DESK_CYCLE` im Event-Store und im Dashboard-Filter TRADES.
+- **Forschung:** `src/firm/research/pipeline.py`. 5 Kandidaten (EMA-Baseline, Donchian-Trend,
+  Zeitreihen-Momentum, RSI-Reversion, lernendes Modell `ml_logit`), Walk-Forward mit echtem
+  Spread, Slippage und Uebernacht-Finanzierung (ANNAHME in `config/costs.toml`), Trial-Counter
+  wird fortgeschrieben. Automatisch beim Start (ohne gueltiges Urteil), danach alle
+  `FIRM_RESEARCH_DAYS` Tage oder auf Anfrage eines Agenten (max. 1x/24 h).
+  Von Hand: `python scripts/research_run.py --days 365`.
+- **Strategie-Tor:** PASS = volles Risiko, FORWARD_TEST = Demo/halbes Risiko,
+  EXPLORE = Demo/Viertel-Risiko (`FIRM_DEMO_EXPLORE=0` schaltet ab). Im LIVE-Modus nur PASS.
+  Urteil fuer andere Kerzen als `FIRM_TRADE_RESOLUTION` = kein Handel (mit Begruendung).
+- **Kill-Kriterien:** je Markt+Strategie auf echten R-Werten (6 Verluste in Folge,
+  Live-DD >= 10 R, Erwartungswert <= -0.3 R nach 20 Trades) -> `STRATEGY_STOPPED`, gesperrt
+  bis zum naechsten Forschungsurteil.
+- **Warum handelt die Firma nicht?** Dashboard-Panel *STRATEGY GATE* und Event `DESK_STATUS`
+  (nur bei Aenderung). Nach `FIRM_IDLE_ALERT_HOURS` ohne Einstieg: `DESK_IDLE` -> CEO-Aufgabe.
+- **Agenten:** ereignisgesteuert (`triggers`, `schedule_hours` in `config/roles/*.yaml`),
+  Antworten als JSON, Zahlen werden gegen das Faktenblatt geprueft (`AGENT_INVALID`).
+  Wirkung nur ueber `RiskOverlay`: Risiko senken / Einstiege befristet sperren, nie erhoehen.
+- **MCP:** `capitalcom-mcp` als Werkzeugkasten der Agenten, nur lesend
+  (Server mit `CAP_ALLOW_TRADING=false`, `CAP_DRY_RUN=true`, Demo-Konto; Client-Allowlist).
 
 Steuerung:
 
 ```bash
-FIRM_TRADING=0            # Desk komplett aus (nur Analyse/Agenten)
-FIRM_TRADE_SECONDS=180    # Scan-Intervall (Default 180 s)
-FIRM_TRADE_RESOLUTION=MINUTE_15
-FIRM_TRADE_COOLDOWN=900   # Sperre pro Symbol nach einem Trade (Sekunden)
-FIRM_TRADE_TIMEOUT=120    # harte Obergrenze pro Scan
+FIRM_TRADING=0              # Desk komplett aus (nur Analyse/Agenten)
+FIRM_TRADE_SECONDS=180      # Scan-Intervall (Default 180 s; ausgewertet wird je abgeschlossener Kerze)
+FIRM_TRADE_RESOLUTION=HOUR  # MUSS zur Forschung passen
+FIRM_RESEARCH_DAYS=7
+FIRM_DEMO_EXPLORE=1
+FIRM_MCP=1
 ```
 
 Sicherheit: Im PAPER-Modus verweigert der Desk den Handel, wenn der Broker kein
-Demo-Host ist. LIVE braucht weiterhin den Approval-Token.
+Demo-Host ist. LIVE braucht weiterhin den Approval-Token und ein PASS-Urteil.
 
 ## 4c. Archiv (Aktenschrank fuer Menschen und Agenten)
 

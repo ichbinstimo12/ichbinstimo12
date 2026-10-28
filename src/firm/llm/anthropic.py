@@ -9,7 +9,7 @@ from src.firm.llm.base import LLMProvider, LLMResponse
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("AnthropicLLM")
 
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
+DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5"
 
 
 class AnthropicLLM(LLMProvider):
@@ -31,7 +31,7 @@ class AnthropicLLM(LLMProvider):
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        max_tokens: int = 1024,
+        max_tokens: int = 4000,
     ):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
@@ -40,6 +40,8 @@ class AnthropicLLM(LLMProvider):
             )
         self.model = model or os.getenv("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL)
         self.max_tokens = max_tokens
+        # Agent tasks are short structured reviews; "low" keeps cost and latency down. Override via env.
+        self.effort = os.getenv("ANTHROPIC_EFFORT", "low")
         self._client = anthropic.AsyncAnthropic(api_key=self.api_key)
 
     async def generate(
@@ -48,24 +50,30 @@ class AnthropicLLM(LLMProvider):
         messages: List[Dict[str, str]],
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
-        model = self.model
-        resp = await self._client.messages.create(
-            model=model,
+        # `temperature` is accepted for interface compatibility but not sent: current Claude models
+        # reject sampling parameters. `json_mode` is enforced through the agents' output contract.
+        resp = await self._client.beta.messages.create(
+            model=self.model,
             max_tokens=max_tokens or self.max_tokens,
             system=system_prompt or "You are a trading firm agent.",
             messages=[
-                {"role": str(m.get("role") or "user"), "content": str(m.get("content") or "")}
-                for m in (messages or [])
+                {"role": "assistant" if m.get("role") == "assistant" else "user", "content": str(m.get("content") or "")}
+                for m in (messages or []) if m.get("role") != "system"
             ],
-            temperature=temperature,
+            output_config={"effort": self.effort},
+            # If a safety classifier declines, the API retries on a fallback model inside the same call.
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
         )
-        text = ""
-        for block in getattr(resp, "content", []) or []:
-            block_type = getattr(block, "type", None)
-            block_text = getattr(block, "text", None)
-            if block_type in (None, "text") and block_text:
-                text += block_text
+        if getattr(resp, "stop_reason", None) == "refusal":
+            raise RuntimeError("Anthropic model declined the request (stop_reason=refusal)")
+        text = "".join(
+            getattr(block, "text", "") or ""
+            for block in getattr(resp, "content", []) or []
+            if getattr(block, "type", None) == "text"
+        )
         usage = getattr(resp, "usage", None)
         usage_dict = {
             "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
@@ -73,7 +81,7 @@ class AnthropicLLM(LLMProvider):
         }
         return LLMResponse(
             content=text.strip(),
-            model=model,
+            model=str(getattr(resp, "model", None) or self.model),
             provider="anthropic",
             usage=usage_dict,
         )

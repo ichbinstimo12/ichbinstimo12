@@ -59,7 +59,8 @@ class ExecutionGateway:
         except Exception:
             return False
 
-    async def execute(self, proposal: TradeProposal, account_balance: float, current_positions: int, current_price: Optional[float] = None) -> Dict[str, Any]:
+    async def execute(self, proposal: TradeProposal, account_balance: float, current_positions: int,
+                      current_price: Optional[float] = None, fx_to_account: float = 1.0) -> Dict[str, Any]:
         """
         The only path to place an order.
         Validates via RiskGate -> Checks Persistent Idempotency -> Places Order.
@@ -72,10 +73,9 @@ class ExecutionGateway:
         # 1. Persistent Idempotency Check
         # We search the EventStore for any event where the payload contains this proposal_id
         if self.event_store is not None:
-            events = self.event_store.get_events()
+            events = self.event_store.get_events(types=["ORDER_FILLED"])
             for event in events:
                 try:
-                    import json
                     payload = json.loads(event['payload_json'])
                     if payload.get('proposal_id') == proposal.proposal_id:
                         logger.warning(f"Duplicate proposal {proposal.proposal_id} found in EventStore. Rejected.")
@@ -96,7 +96,8 @@ class ExecutionGateway:
             }),
             account_balance,
             current_positions,
-            current_price
+            current_price,
+            fx_to_account,
         )
 
         if not allowed:

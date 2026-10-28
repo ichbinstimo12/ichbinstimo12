@@ -313,6 +313,11 @@
     </section>
 
     <section class="panel">
+      <div class="panel-head"><h2>STRATEGY GATE</h2><span class="hint" id="gate-hint">why the desk trades (or not)</span></div>
+      <div class="panel-body" id="gate" style="max-height:300px"><div class="empty">no research verdicts yet</div></div>
+    </section>
+
+    <section class="panel">
       <div class="panel-head"><h2>OPEN POSITIONS</h2><span class="hint" id="pos-hint">broker truth</span></div>
       <div class="panel-body" id="positions" style="max-height:300px"><div class="empty">no open positions</div></div>
     </section>
@@ -532,6 +537,7 @@
     renderFeed();
     renderTasks();
     renderPositions();
+    renderGate();
     renderLessons();
     renderArchive();
     renderLessonCount();
@@ -723,6 +729,39 @@
         <span class="upl ${upl === null ? "" : (upl >= 0 ? "up" : "down")}">${upl === null ? "—" : (upl > 0 ? "+" : "") + money(upl)}</span>`;
       box.appendChild(el);
     }
+  }
+
+  function renderGate() {
+    // Real data only: research verdicts, the desk's last stated reasons, agent risk overlays.
+    const box = $("gate");
+    const st = (state.status && state.status.strategy) || {};
+    const gate = st.gate || {};
+    const verdicts = gate.verdicts || {};
+    const reasons = (st.desk && st.desk.reasons) || {};
+    const overlays = st.overlays || [];
+    const created = gate.created ? new Date(gate.created * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "—";
+    $("gate-hint").textContent = `verdicts ${created} · trials ${gate.trials ?? "—"}`;
+    const epics = Array.from(new Set([...Object.keys(verdicts), ...Object.keys(reasons)]));
+    if (!epics.length && !(st.desk && st.desk.error)) {
+      box.innerHTML = '<div class="empty">no research verdicts yet — the lab runs automatically once the broker is connected</div>';
+      return;
+    }
+    let html = "";
+    if (st.desk && st.desk.error) html += `<div class="pos"><span class="epic">DESK</span><span class="nums">${esc(st.desk.error)}</span></div>`;
+    for (const e of epics) {
+      const v = verdicts[e] || {};
+      const lane = v.verdict || "—";
+      const strat = v.strategy ? ` · ${esc(v.strategy)}` : "";
+      const explore = v.explore ? ` · explore ${esc(v.explore)}` : "";
+      const n = v.oos_trades != null ? ` · OOS n=${esc(v.oos_trades)}, E=${Number(v.oos_expectancy_r).toFixed(2)} R` : "";
+      html += `<div class="pos"><span class="epic">${esc(e)}</span><span class="side ${lane === "PASS" ? "buy" : "sell"}">${esc(lane)}</span>
+        <span class="nums">${strat}${explore}${n}<br>${esc(reasons[e] || "")}</span></div>`;
+    }
+    for (const o of overlays) {
+      html += `<div class="pos"><span class="epic">${esc(o.epic)}</span><span class="side sell">x${Number(o.factor).toFixed(2)}</span>
+        <span class="nums">${esc(o.agent_id)}: ${esc(o.reason)}</span></div>`;
+    }
+    box.innerHTML = html;
   }
 
   function renderLessons() {

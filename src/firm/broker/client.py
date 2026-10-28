@@ -129,9 +129,8 @@ class CapitalComClient:
         return True
 
     async def _ensure_session(self) -> None:
-        if self.session is None:
-            raise ConnectionError("No active session. Call authenticate() first.")
-        if time.time() >= self.session.expires_at:
+        # (Re-)login lazily: after a failed start or an expired session the next call recovers by itself.
+        if self.session is None or time.time() >= self.session.expires_at:
             await self.authenticate()
 
     def _get_headers(self) -> Dict[str, str]:
@@ -195,6 +194,19 @@ class CapitalComClient:
         except Exception as e:
             logger.error(f"Failed to get prices for {epic}: {e}")
             return []
+
+    async def get_prices_range(self, epic: str, resolution: str, date_from: str, date_to: str,
+                               max_items: int = 1000) -> List[Dict[str, Any]]:
+        """Raw price objects for one page of history (from/to in UTC, 'YYYY-MM-DDTHH:MM:SS'). Raises on errors."""
+        params = {"resolution": resolution, "from": date_from, "to": date_to, "max": max(1, min(int(max_items), 1000))}
+        try:
+            data = (await self._request("GET", f"/prices/{epic}", params=params)).json()
+        except httpx.HTTPStatusError as e:
+            # Capital.com answers 404 "error.prices.not-found" for a window without prices (weekend, holiday).
+            if e.response.status_code == 404:
+                return []
+            raise
+        return data.get("prices") or []
 
     async def get_market_details(self, epic: str) -> Dict[str, Any]:
         """
@@ -260,12 +272,14 @@ class CapitalComClient:
         return candles
 
     async def get_positions(self) -> List[Dict[str, Any]]:
-        """Flat list: dealId, epic, direction, volume, level, upl (live P/L)."""
-        try:
-            data = (await self._request("GET", "/positions")).json()
-        except Exception as e:
-            logger.error(f"Failed to get positions: {e}")
-            return []
+        """
+        Flat list: dealId, epic, direction, volume, level, upl (live P/L).
+
+        Raises on any API error. Returning [] here would be read as "flat" by
+        the reconciler, the kill switch and the desk - a transient HTTP error
+        must never look like a confirmed empty book.
+        """
+        data = (await self._request("GET", "/positions")).json()
 
         positions: List[Dict[str, Any]] = []
         for item in data.get("positions") or []:
@@ -285,6 +299,32 @@ class CapitalComClient:
                 "currency": market.get("currency") or pos.get("currency"),
             })
         return positions
+
+    async def get_transactions(self, last_period_seconds: int = 86400) -> List[Dict[str, Any]]:
+        """
+        Realised account transactions (trade P&L, swaps, fees) from
+        GET /history/transactions. Used to book the real profit of positions
+        the broker closed by stop/target. Raises on API errors.
+        """
+        params = {"lastPeriod": max(60, int(last_period_seconds))}
+        data = (await self._request("GET", "/history/transactions", params=params)).json()
+        out: List[Dict[str, Any]] = []
+        for t in data.get("transactions") or []:
+            try:
+                size = float(t.get("size")) if t.get("size") not in (None, "") else None
+            except (TypeError, ValueError):
+                size = None
+            out.append({
+                "date": t.get("dateUtc") or t.get("date"),
+                "instrument": t.get("instrumentName"),
+                "type": t.get("transactionType"),
+                "note": t.get("note"),
+                "reference": t.get("reference"),
+                "deal_id": t.get("dealId"),
+                "amount": size,
+                "currency": t.get("currency"),
+            })
+        return out
 
     # -------------------------------------------------------------- write
     async def place_order(

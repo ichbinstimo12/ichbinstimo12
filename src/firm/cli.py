@@ -308,7 +308,7 @@ async def main():
             os.environ.setdefault("OLLAMA_MODEL", "llama3.1:8b")
         elif args.provider == "anthropic":
             os.environ["LLM_PROVIDER"] = "anthropic"
-            os.environ.setdefault("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+            os.environ.setdefault("ANTHROPIC_MODEL", "claude-opus-5-5")
             if not env_secret("ANTHROPIC_API_KEY"):
                 logger.error("ANTHROPIC_API_KEY is not set. Add it to .env before switching to anthropic.")
                 return

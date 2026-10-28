@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.firm.bus.event_store import EventStore
+from src.firm.money.strategy_gate import StrategyGate
 from src.firm.agents.task_queue import TaskQueue
 
 logging.basicConfig(level=logging.INFO)
@@ -88,7 +89,7 @@ def create_app(
             raise HTTPException(status_code=401, detail="Invalid or missing API token")
 
     def latest_snapshot() -> Optional[Dict[str, Any]]:
-        for event in reversed(store.get_events()):
+        for event in reversed(store.get_events(types=["ACCOUNT_SNAPSHOT"], last=1)):
             if event["type"] == "ACCOUNT_SNAPSHOT":
                 try:
                     return json.loads(event["payload_json"])
@@ -118,6 +119,26 @@ def create_app(
         archive_cache["at"] = now
         return stats
 
+    def strategy_payload() -> Dict[str, Any]:
+        """Why the desk trades or not: research verdicts, desk reasons, agent risk overlays (all real data)."""
+        gate = getattr(orchestrator, "gate", None) or StrategyGate()
+        overlay = getattr(orchestrator, "overlay", None)
+        status = store.get_events(types=["DESK_STATUS"], last=1)
+        desk_status = None
+        if status:
+            try:
+                desk_status = json.loads(status[-1]["payload_json"]) | {"since": status[-1]["ts"]}
+            except (json.JSONDecodeError, TypeError):
+                desk_status = None
+        research = store.get_events(types=["RESEARCH_STARTED", "RESEARCH_DONE", "RESEARCH_FAILED"], last=1)
+        return {
+            "gate": gate.overview(),
+            "desk": desk_status,
+            "research_last_event": ({"type": research[-1]["type"], "ts": research[-1]["ts"]} if research else None),
+            "overlays": overlay.active() if overlay is not None else [],
+            "mcp_tools": list(getattr(getattr(orchestrator, "tools", None), "tools", []) or []),
+        }
+
     def status_payload() -> Dict[str, Any]:
         snapshot = latest_snapshot()
         desk = getattr(orchestrator, "trading_desk", None)
@@ -144,6 +165,7 @@ def create_app(
                 if getattr(getattr(orchestrator, "agent_runtime", None), "memory", None) is not None
                 else 0
             ),
+            "strategy": strategy_payload(),
             "kill_switch_active": bool(getattr(getattr(orchestrator, "kill_switch", None), "is_active", False)),
             "agents": [
                 {"name": c.name, "role": c.role}
@@ -178,7 +200,7 @@ def create_app(
     @app.get("/api/events", dependencies=[Depends(require_token)])
     async def get_events(limit: int = 100):
         limit = max(1, min(limit, 1000))
-        return {"events": store.get_events()[-limit:]}
+        return {"events": store.get_events(last=limit)}
 
     @app.get("/api/tasks", dependencies=[Depends(require_token)])
     async def get_tasks(status: Optional[str] = None):
@@ -319,7 +341,7 @@ def create_app(
 
         await manager.connect(websocket)
         try:
-            history = store.get_events()[-100:]
+            history = store.get_events(last=100)
             await websocket.send_json({
                 "type": "SYNC",
                 "data": history,
@@ -333,7 +355,7 @@ def create_app(
                 nonlocal last_ts
                 while True:
                     await asyncio.sleep(0.5)
-                    new_events = store.get_events(after_ts=last_ts) if last_ts else store.get_events()
+                    new_events = store.get_events(after_ts=last_ts) if last_ts else store.get_events(last=100)
                     for event in new_events:
                         await websocket.send_json({"type": "EVENT", "data": event})
                         last_ts = event["ts"]

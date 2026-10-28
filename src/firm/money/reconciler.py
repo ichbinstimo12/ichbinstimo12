@@ -1,13 +1,5 @@
 import asyncio
 import logging
-from typing import Tuple
-from src.firm.broker.client import CapitalComClient
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("Reconciler")
-
-import asyncio
-import logging
 import json
 from typing import Any, Dict, List, Callable, Awaitable
 from src.firm.broker.client import CapitalComClient
@@ -36,7 +28,7 @@ class Reconciler:
         ``run()`` so the book never drifts.
         """
         positions: Dict[str, float] = {}
-        events = self.event_store.get_events()
+        events = self.event_store.get_events(types=["ORDER_FILLED", "POSITION_CLOSED"])
 
         for event in events:
             try:

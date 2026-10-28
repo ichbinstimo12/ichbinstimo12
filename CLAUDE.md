@@ -96,7 +96,7 @@ LLM-Interface (`src/firm/llm/`): `OllamaLLM` oder `AnthropicLLM`, ausgewählt ü
   `OLLAMA_MODEL=llama3.1`. Start: `ollama serve` · Pull: `ollama pull llama3.1`.
   Kein API-Key, keine Cloud-Kosten, läuft offline.
 - **Upgrade auf Anthropic:** `LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY=<...>`,
-  `ANTHROPIC_MODEL=claude-sonnet-4-5`. API-Key: https://console.anthropic.com → API Keys
+  `ANTHROPIC_MODEL=claude-opus-5-5`. API-Key: https://console.anthropic.com → API Keys
   (inkl. pro/upgrade Verfügbarkeit des gewählten Modells). Danach: `python -m src.firm llm --provider anthropic`.
 
 Der Firm-Code (Agent-Runtime, Orchestrator) kennt keinen Provider direkt – er nutzt die

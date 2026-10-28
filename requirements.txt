@@ -1,11 +1,14 @@
-# Dependencies for the Autonomous Trading Firm
+# Dependencies for the Autonomous Trading Firm (Python 3.11+)
 fastapi
 uvicorn[standard]
-pydantic
+pydantic>=2
 httpx
 python-dotenv
-anthropic
+pyyaml
+anthropic>=2.3      # LLM provider (only used with LLM_PROVIDER=anthropic)
+numpy               # research lab: learning model (logistic regression)
 pandas
-numpy
+mcp                 # MCP client for the agents' read-only Capital.com tools
+capitalcom-mcp==0.3.4  # Capital.com MCP server (github.com/SimonTarara62/capitalcom-mcp-server), pinned
 pytest
 pytest-asyncio

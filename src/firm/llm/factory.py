@@ -28,7 +28,7 @@ def create_llm_provider(provider_name: Optional[str] = None, model: Optional[str
         logger.info("LLM provider: ollama (base_url=%s, model=%s)", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"), model or os.getenv("OLLAMA_MODEL", "llama3.1:8b"))
         return OllamaLLM(model=model)
     if name == "anthropic":
-        logger.info("LLM provider: anthropic (model=%s)", model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5"))
+        logger.info("LLM provider: anthropic (model=%s)", model or os.getenv("ANTHROPIC_MODEL", "claude-opus-5-5"))
         return AnthropicLLM(model=model)
     raise ValueError(f"Unknown LLM_PROVIDER '{name}'. Valid options: 'ollama', 'anthropic'.")
 

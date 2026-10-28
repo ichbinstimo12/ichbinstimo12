@@ -1,8 +1,10 @@
 name: Archivist
 role: Archive and Knowledge Curator
-model: llama3.1:8b
 daily_token_budget: 60000
 reporting_line: CEO
+schedule_hours: 24
+triggers: []
+actions: [flag]
 tool_allowlist:
   - read_events
   - read_tasks

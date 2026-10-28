@@ -45,6 +45,7 @@ class OllamaLLM(LLMProvider):
         messages: List[Dict[str, str]],
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
         ollama_messages: List[Dict[str, str]] = []
         if system_prompt:
@@ -60,10 +61,16 @@ class OllamaLLM(LLMProvider):
             "messages": ollama_messages,
             "stream": False,
         }
+        # Ollama reads sampling settings only from "options" (top-level keys are ignored).
+        options: Dict[str, object] = {}
         if temperature is not None:
-            payload["temperature"] = temperature
+            options["temperature"] = temperature
         if max_tokens is not None:
-            payload["num_predict"] = max_tokens
+            options["num_predict"] = max_tokens
+        if options:
+            payload["options"] = options
+        if json_mode:
+            payload["format"] = "json"
 
         response = await self._client.post(
             f"{self.base_url}/api/chat",

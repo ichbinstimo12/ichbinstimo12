@@ -76,9 +76,14 @@ class SignalEngineV2:
                       reason=f"{self.strategy_name} {side}: Schluss {cs[i]['c']:.5g}, ATR {a:.5g}, Stop {sd:.5g} ({sd / a:.1f} ATR), "
                              f"Kerze {int(bar_ts)}")
 
-    def should_exit(self, epic, candles, side: str) -> bool:
-        """Exit-Regel der Strategie auf der letzten abgeschlossenen Kerze (Gegenkanal/Signalwechsel/Zeit)."""
+    def should_exit(self, epic, candles, side: str, opened_ts: Optional[float] = None) -> bool:
+        """Exit-Regel der Strategie auf der letzten abgeschlossenen Kerze (Gegenkanal/Signalwechsel/Zeit-Stop).
+        Der Zeit-Stop (`max_bars`) gilt wie im Backtest: Kerzen seit Einstieg >= max_bars -> raus."""
         cs = self._closed(candles)
         if len(cs) < self.warmup:
             return False
+        if opened_ts and self.strat.max_bars:
+            held = sum(1 for c in cs if c["ts"] >= opened_ts)
+            if held >= self.strat.max_bars:
+                return True
         return bool(self.strat.exit(lab.Ind(cs), len(cs) - 1, side))

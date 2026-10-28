@@ -11,7 +11,8 @@ class StubLLM(LLMProvider):
     provider_name = "stub"
 
     async def generate(self, system_prompt, messages, max_tokens=None, temperature=None):
-        return LLMResponse(content="stub thought", model="stub", provider="stub")
+        return LLMResponse(content='{"summary": "stub thought", "actions": [], "lesson": null}',
+                           model="stub", provider="stub")
 
     async def close(self):
         pass

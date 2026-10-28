@@ -31,8 +31,9 @@ class LLMProvider(ABC):
         messages: List[Dict[str, str]],
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        json_mode: bool = False,
     ) -> LLMResponse:
-        """Generate a completion.
+        """Generate a completion. `json_mode` asks the provider for a single JSON object where supported.
 
         `messages` is a chat-style list, e.g.
         [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
