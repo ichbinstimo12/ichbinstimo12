@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, content=device, initial-scale=1.0">
+    <title>Quant Firm | Command Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-green: #00ff9d;
+            --neon-blue: #00d4ff;
+            --neon-red: #ff4b2b;
+            --bg-dark: #050506;
+            --glass: rgba(15, 15, 20, 0.85);
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: #e2e8f0;
+            overflow: hidden;
+            height: 100vh;
+        }
+        .font-orbitron { font-family: 'Orbitron', sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+        .glass-panel {
+            background: var(--glass);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        }
+
+        /* THE TOP-DOWN OFFICE VIEW */
+        .office-floor {
+            position: relative;
+            width: 100%;
+            height: 70vh;
+            background:
+                linear-gradient(rgba(0, 255, 157, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 157, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            border: 2px solid rgba(0, 255, 157, 0.2);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .robot-worker {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            cursor: pointer;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 10;
+        }
+
+        .robot-body {
+            width: 40px;
+            height: 40px;
+            background: #2d3748;
+            border: 2px solid var(--neon-blue);
+            border-radius: 8px;
+            position: relative;
+            margin: 10px auto;
+            box-shadow: 0 0 15px var(--neon-blue);
+        }
+
+        .robot-head {
+            width: 20px;
+            height: 10px;
+            background: var(--neon-blue);
+            position: absolute;
+            top: -8px;
+            left: 10px;
+            border-radius: 2px;
+            box-shadow: 0 0 10px var(--neon-blue);
+        }
+
+        .robot-active {
+            animation: robot-work 2s infinite ease-in-out;
+        }
+
+        @keyframes robot-work {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        /* Modal Overlay */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            width: 500px;
+            border: 2px solid var(--neon-green);
+            box-shadow: 0 0 30px var(--neon-green);
+        }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-7xl mx-auto h-full flex flex-col">
+
+        <!-- TOP BAR -->
+        <div class="flex justify-between items-center mb-8">
+            <div>
+                <h1 class="text-3xl font-orbitron font-bold text-white tracking-widest">NEURAL-TRAD <span class="text-green-500">HQ</span></h1>
+                <p class="text-slate-500 mono text-sm">SURVIVAL MODE: ACTIVE | CAPITAL: <span id="wallet-balance" class="text-green-400">0.00</span> Francs</p>
+            </div>
+            <div class="glass-panel px-6 py-2 rounded-full border-green-500/30">
+                <span class="text-xs mono text-slate-400 uppercase mr-2">Firm Status:</span>
+                <span id="firm-status" class="text-green-400 font-bold mono">ONLINE</span>
+            </div>
+        </div>
+
+        <!-- THE OFFICE (Top Down View) -->
+        <div class="office-floor" id="office-floor">
+            <!-- Robots will be injected here -->
+        </div>
+
+        <!-- FOOTER LOG -->
+        <div class="mt-6 glass-panel p-4 rounded-xl h-32 overflow-hidden">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-xs font-orbitron text-slate-500 uppercase">System Telemetry</h3>
+                <div class="text-[10px] mono text-slate-600" id="clock">00:00:00</div>
+            </div>
+            <div id="activity-log" class="mono text-xs space-y-1 overflow-y-auto h-24 text-slate-400">
+                <div>[SYSTEM] BootingNeural-Trade HQ...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- EMPLOYEE DETAIL MODAL -->
+    <div id="employee-modal" class="modal">
+        <div class="modal-content glass-panel p-8 rounded-3xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 id="m-name" class="text-2xl font-orbitron text-white">Agent Name</h2>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div class="grid grid-cols-2 gap-6 mb-8">
+                <div class="bg-black/40 p-4 rounded-xl border border-white/5">
+                    <p class="text-xs text-slate-500 uppercase mono">Role</p>
+                    <p id="m-role" class="text-lg text-white font-bold">Trader</p>
+                </div>
+                <div class="bg-black/40 p-4 rounded-xl border border-white/5">
+                    <p class="text-xs text-slate-s500 uppercase mono">Performance</p>
+                    <p id="m-pnl" class="text-lg font-bold text-green-400 mono">+0.00</p>
+                </div>
+                <div class="bg-black/40 p-4 rounded-xl border border-white/5">
+                    <p class="text-xs text-slate-500 uppercase mono">Current State</p>
+                    <p id="m-status" class="text-lg text-blue-400 mono">Idle</p>
+                </div>
+                <div class="bg-black/40 p-4 rounded-xl border border-white/5">
+                    <p class="text-xs text-slate-500 uppercase mono">Experience</p>
+                    <p id="m-exp" class="text-lg text-white mono">0 XP</p>
+                </div>
+            </div>
+            <div class="text-center">
+                <p class="text-xs text-slate-500 mono mb-2">CONFIDENCE LEVEL</p>
+                <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                    <div id="m-confidence" class="bg-green-500 h-full transition-all duration-500" style="width: 50%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/status';
+        const state = {};
+
+        async function updateOffice() {
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+
+                document.getElementById('wallet-balance').innerText =
+                    `${data.total_equity.toFixed(2)} Francs`;
+
+                const floor = document.getElementById('office-floor');
+                const workers = data.active_workers;
+
+                // We map each worker to a fixed position in the office
+                const positions = [
+                    {x: '20%', y: '20%'}, {x: '40%', y: '20%'}, {x: '60%', y: '20%'},
+                    {x: '20%', y: '50%'}, {x: '40%', y: '50%'}, {x: '60%', y: '50%'},
+                    {x: '80%', y: '30%'}, {x: '80%', y, '60%'}
+                ];
+
+                workers.forEach((id, index) => {
+                    const info = data.performance[id];
+                    let robot = document.getElementById(`bot-${id}`);
+
+                    if (!robot) {
+                        const pos = positions[index % positions.length] || {x: '50%', y: '50%'};
+                        robot = document.createElement('div');
+                        robot.id = `bot-${id}`;
+                        robot.className = 'robot-worker';
+                        robot.style.left = pos.x;
+                        robot.style.top = pos.y;
+                        robot.onclick = () => showDetails(id, info);
+
+                        robot.innerHTML = `
+                            <div class="robot-body ${info.status === 'ACTIVE' ? 'robot-active' : ''}">
+                                <div class="robot-head"></div>
+                            </div>
+                            <div class="text-center text-[10px] mono text-slate-500 mt-1">${id}</div>
+                        `;
+                        floor.appendChild(robot);
+                    } else {
+                        // Update animation based on status
+                        const body = robot.querySelector('.robot-body');
+                        if (info.status === 'ACTIVE' || info.status === 'EXECUTING') {
+                            body.classList.add('robot-active');
+                        } else {
+                            body.classList.remove('robot-active');
+                        }
+                    }
+                });
+
+            } catch (e) {
+                console.error("API Error:", e);
+            }
+        }
+
+        function showDetails(id, info) {
+            document.getElementById('m-name').innerText = id;
+            document.getElementById('m-role').innerText = info.role || 'Worker';
+            document.getElementById('m-status').innerText = info.status || 'Idle';
+            document.getElementById('m-exp').innerText = (info.exp || 0) + ' XP';
+            document.getElementById('m-pnl').innerText = (info.pnl || 0).toFixed(2);
+            document.getElementById('m-pnl').className = info.pnl >= 0 ? 'text-lg font-bold text-green-400 mono' : 'text-lg font-bold text-red-400 mono';
+            document.getElementById('m-confidence').style.width = (info.confidence * 100 || 50) + '%';
+
+            document.getElementById('employee-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('employee-modal').style.display = 'none';
+        }
+
+        // Clock
+        setInterval(() => {
+            document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+        }, 1000);
+
+        setInterval(updateOffice, 2000);
+        update,Office();
+    </script>
+</body>
+</html>

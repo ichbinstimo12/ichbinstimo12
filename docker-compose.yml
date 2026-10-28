@@ -1,0 +1,29 @@
+services:
+  firm:
+    build: .
+    env_file:
+      - .env
+    environment:
+      FIRM_API_TOKEN: ${FIRM_API_TOKEN:?set FIRM_API_TOKEN in .env}
+      FIRM_HALT_FILE: /app/data/firm.halt      # Halt-Flag ueberlebt Neustarts
+      FIRM_OPEN_BROWSER: "0"                    # auf dem Server gibt es keinen Browser
+    volumes:
+      - ./firm_events.db:/app/firm_events.db    # vorher: touch firm_events.db firm_state.json
+      - ./firm_state.json:/app/firm_state.json  # Tagesstart-Kontostand, Peak, Regeln
+      - ./data:/app/data                        # Forschungsurteile, Historie, Halt-Flag
+      - ./archiv:/app/archiv
+      - ./config:/app/config:ro
+      - ./web:/app/web:ro
+    ports:
+      - "127.0.0.1:8000:8000"                   # NUR lokal erreichbar; Zugriff per SSH-Tunnel
+    command: python -m src.firm run --dashboard --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "5"}

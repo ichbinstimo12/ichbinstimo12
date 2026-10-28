@@ -1,0 +1,25 @@
+{
+    "Trader_1": {
+        "role": "Trader",
+        "status": "ANALYZING",
+        "pnl": 3.0,
+        "exp": 3
+    },
+    "firm": {
+        "balance": 200.0,
+        "status": "ALIVE",
+        "employees": 3
+    },
+    "Trader_3": {
+        "role": "Trader",
+        "status": "ANALYZING",
+        "pnl": 1.0,
+        "exp": 1
+    },
+    "Trader_2": {
+        "role": "Trader",
+        "status": "ANALYZING",
+        "pnl": 3.0,
+        "exp": 3
+    }
+}

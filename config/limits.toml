@@ -1,0 +1,16 @@
+# Global Risk Limits
+# These are read-only for agents. Changes require manual edit.
+
+[account]
+daily_loss_limit = 0.02      # 2% hard stop
+max_drawdown_limit = 0.08    # 8% hard stop from peak
+max_leverage = 10.0          # Max account leverage
+max_positions = 3            # Max total open positions
+
+[trade]
+max_risk_per_trade = 0.005   # 0.5% risk per trade
+max_pos_size_per_instrument = 0.1 # Asset specific limits handled in Whitelist
+
+[operational]
+max_token_budget_daily = 1000000
+max_agents = 10

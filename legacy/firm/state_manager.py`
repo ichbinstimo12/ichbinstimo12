@@ -1,0 +1,33 @@
+import json
+import os
+import threading
+import logging
+
+class FirmState:
+    """
+    Thread-safe state manager for the Quant Firm.
+    Prevents JSONDecodeError by using a Lock for all file access.
+    """
+    def __init__(self, state_file="firm_state.json"):
+        # Force absolute path to prevent directory confusion
+        self.state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), state_file)
+        self.lock = threading.Lock()
+
+    def save(self, data):
+        with self.lock:
+            try:
+                with open(self.state_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4)
+            except Exception as e:
+                logging.error(f"State save failed: {e}")
+
+    def load(self):
+        with self.lock:
+            if not os.path.exists(self.state_file):
+                return {"firm": {"balance": 200.0, "status": "STARTING"}, "workers": {}}
+            try:
+                with open(self.state_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.error(f"State load failed: {e}")
+                return {"firm": {"balance": 200.0, "status": "ERROR"}, "workers": {}}

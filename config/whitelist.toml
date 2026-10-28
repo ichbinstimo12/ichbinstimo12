@@ -1,0 +1,12 @@
+# Approved Instruments Whitelist
+# Only epics listed here can be traded.
+#
+# These are the exact Capital.com epics. XAUUSD does not exist on Capital.com;
+# gold is traded under the epic GOLD.
+
+allowed_epics = [
+    "BTCUSD",
+    "EURUSD",
+    "GOLD",
+    "AAPL"
+]

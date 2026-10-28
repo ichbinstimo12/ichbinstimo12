@@ -1,0 +1,11 @@
+# Dependencies for the Autonomous Trading Firm
+fastapi
+uvicorn[standard]
+pydantic
+httpx
+python-dotenv
+anthropic
+pandas
+numpy
+pytest
+pytest-asyncio

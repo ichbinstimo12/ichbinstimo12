@@ -1,0 +1,1873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Firm · Operations Floor</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #06090d;
+    --panel: #0b1118;
+    --panel-2: #0f1721;
+    --line: #1b2634;
+    --text: #c6d4e3;
+    --muted: #6b7d92;
+    --dim: #3f4f63;
+    --cyan: #38bdf8;
+    --emerald: #34d399;
+    --amber: #fbbf24;
+    --violet: #a78bfa;
+    --rose: #fb7185;
+    --teal: #2dd4bf;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 520px at 18% -12%, #0d1a26 0%, transparent 62%),
+      radial-gradient(900px 480px at 100% -4%, #14101f 0%, transparent 58%),
+      var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+    font-size: 13px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app { max-width: 1560px; margin: 0 auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* ---------- header ---------- */
+  header.top {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: linear-gradient(180deg, #0e1621, #0a1017);
+    border: 1px solid var(--line); border-radius: 10px; padding: 11px 15px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  .brand .name { font-size: 15px; letter-spacing: .16em; font-weight: 700; color: #e8f1fa; }
+  .brand .ver { font-size: 10px; color: var(--dim); letter-spacing: .12em; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 3px 9px; font-size: 10px; letter-spacing: .1em; color: var(--muted);
+    background: #080d13;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: 0 0 auto; }
+  .dot.ok { background: var(--emerald); box-shadow: 0 0 8px rgba(52,211,153,.8); }
+  .dot.warn { background: var(--amber); box-shadow: 0 0 8px rgba(251,191,36,.7); }
+  .dot.bad { background: var(--rose); box-shadow: 0 0 8px rgba(251,113,133,.7); }
+  .spacer { flex: 1 1 auto; }
+  .metrics { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .metric { display: flex; flex-direction: column; gap: 2px; min-width: 84px; }
+  .metric .k { font-size: 9px; letter-spacing: .14em; color: var(--dim); }
+  .metric .v { font-size: 14px; color: #eaf3fb; font-weight: 700; }
+  .metric .v small { font-size: 10px; color: var(--muted); font-weight: 400; }
+  .metric .v.up { color: var(--emerald); }
+  .metric .v.down { color: var(--rose); }
+  .kill {
+    border: 1px solid #7f1d1d; background: #2a0d12; color: #fecdd3;
+    padding: 8px 14px; border-radius: 7px; font: inherit; font-size: 11px;
+    letter-spacing: .12em; cursor: pointer; transition: .15s;
+  }
+  .kill:hover { background: #451018; border-color: var(--rose); }
+
+  /* ---------- layout ---------- */
+  .grid-main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 12px; }
+  .grid-bottom { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 12px; }
+  @media (max-width: 1080px) {
+    .grid-main, .grid-bottom { grid-template-columns: 1fr; }
+  }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .panel-head {
+    display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+    border-bottom: 1px solid var(--line); background: #090f16;
+  }
+  .panel-head h2 { margin: 0; font-size: 10px; letter-spacing: .18em; color: #9fb3c8; font-weight: 700; }
+  .panel-head .hint { margin-left: auto; font-size: 10px; color: var(--dim); }
+  .panel-body { padding: 12px; overflow: auto; }
+
+  /* ---------- office ---------- */
+  #office-wrap { position: relative; background: #05080c; overflow: hidden; }
+  #office { display: block; width: 100%; height: 400px; }
+  .office-legend {
+    display: flex; gap: 14px; flex-wrap: wrap; padding: 8px 12px;
+    border-top: 1px solid var(--line); font-size: 10px; color: var(--dim);
+    background: #080d13;
+  }
+  .office-legend b { color: var(--muted); font-weight: 600; }
+
+  /* ---------- roster ---------- */
+  .roster { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .agent {
+    border: 1px solid var(--line); border-left: 3px solid var(--dim);
+    border-radius: 8px; background: var(--panel-2); padding: 9px 10px; cursor: pointer;
+    transition: border-color .15s, transform .15s;
+  }
+  .agent:hover { border-color: #2b3d52; transform: translateY(-1px); }
+  .agent.selected { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(56,189,248,.25) inset; }
+  .agent .row1 { display: flex; align-items: center; gap: 7px; }
+  .agent .aname { font-size: 12px; font-weight: 700; color: #e6eff8; }
+  .agent .state { margin-left: auto; font-size: 9px; letter-spacing: .1em; color: var(--dim); }
+  .agent .role { margin-top: 2px; font-size: 10px; color: var(--muted); }
+  .agent .meta { margin-top: 7px; display: flex; gap: 10px; font-size: 10px; color: var(--dim); }
+  .agent .meta b { color: #b9cbe0; font-weight: 700; }
+
+  /* ---------- feed ---------- */
+  #feed { height: 430px; overflow: auto; padding: 8px 10px; }
+  .feed-row {
+    display: grid; grid-template-columns: 52px 86px 1fr; gap: 8px;
+    padding: 6px 6px; border-left: 2px solid transparent; border-radius: 4px;
+  }
+  .feed-row + .feed-row { border-top: 1px solid #0e151f; }
+  .feed-row:hover { background: #0a1118; }
+  .feed-row .t { color: var(--dim); font-size: 10px; padding-top: 1px; }
+  .feed-row .a { color: #9fb3c8; font-size: 10px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .feed-row .m { color: #b6c6d8; font-size: 11px; line-height: 1.45; word-break: break-word; }
+  .feed-row .m .tag { font-size: 9px; letter-spacing: .08em; margin-right: 6px; padding: 1px 5px; border-radius: 3px; border: 1px solid currentColor; }
+  .filters { display: flex; gap: 4px; margin-left: auto; }
+  .filters button {
+    background: #080d13; color: var(--dim); border: 1px solid var(--line);
+    border-radius: 4px; font: inherit; font-size: 9px; letter-spacing: .08em;
+    padding: 3px 6px; cursor: pointer;
+  }
+  .filters button.on { color: #dbe9f6; border-color: #33506b; background: #0f1822; }
+
+  /* ---------- tasks ---------- */
+  .tasks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 760px) { .tasks { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  .col { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px; min-height: 120px; }
+  .col h3 { margin: 0 0 6px; font-size: 9px; letter-spacing: .12em; color: var(--muted); display: flex; justify-content: space-between; }
+  .col h3 span { color: #dbe9f6; }
+  .task { border-left: 2px solid var(--dim); padding: 5px 6px; margin-bottom: 5px; background: #0a1017; border-radius: 3px; }
+  .task .tt { font-size: 10px; color: #c6d6e6; line-height: 1.35; }
+  .task .ta { font-size: 9px; color: var(--dim); margin-top: 3px; }
+  .task.running { border-left-color: var(--cyan); }
+  .task.done { border-left-color: var(--emerald); }
+  .task.failed { border-left-color: var(--rose); }
+  .empty { color: var(--dim); font-size: 10px; font-style: italic; padding: 4px 2px; }
+
+  /* ---------- positions ---------- */
+  .pos { display: grid; grid-template-columns: 76px 52px 1fr auto; gap: 8px; align-items: center;
+         padding: 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); margin-bottom: 6px; }
+  .pos .epic { font-size: 11px; font-weight: 700; color: #e6eff8; }
+  .pos .side { font-size: 9px; letter-spacing: .1em; padding: 2px 6px; border-radius: 3px; text-align: center; }
+  .pos .side.buy { color: #052e1f; background: var(--emerald); }
+  .pos .side.sell { color: #2e0710; background: var(--rose); }
+  .pos .nums { font-size: 10px; color: var(--muted); line-height: 1.5; }
+  .pos .nums b { color: #c6d6e6; }
+  .pos .upl { font-size: 11px; font-weight: 700; }
+  .pos .upl.up { color: var(--emerald); }
+  .pos .upl.down { color: var(--rose); }
+
+  /* ---------- lessons ---------- */
+  .lesson { padding: 7px 0; border-bottom: 1px solid #0e151f; }
+  .lesson:last-child { border-bottom: 0; }
+  .lesson .lh { display: flex; align-items: center; gap: 6px; font-size: 9px; color: var(--dim); }
+  .lesson .lh b { color: #a9bdd2; font-weight: 700; }
+  .lesson .lh .conf { margin-left: auto; }
+  .lesson .lt { margin-top: 3px; font-size: 11px; color: #c2d2e2; line-height: 1.45; }
+
+  /* ---------- inspector ---------- */
+  #inspector .panel-body { min-height: 92px; }
+  #inspector .iname { font-size: 13px; font-weight: 700; color: #e8f1fa; }
+  #inspector .irow { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; font-size: 10px; color: var(--muted); }
+  #inspector .irow b { color: #c6d6e6; }
+  #inspector .iact { margin-top: 8px; font-size: 11px; color: #b6c6d8; line-height: 1.5; }
+
+  /* ---------- overlays ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(4,7,11,.86); backdrop-filter: blur(3px);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .overlay.show { display: flex; }
+  .card {
+    width: min(420px, 100%); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 20px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: .14em; color: #dbe9f6; }
+  .card p { margin: 0 0 14px; font-size: 11px; color: var(--muted); line-height: 1.6; }
+  .card input {
+    width: 100%; background: #060b10; border: 1px solid var(--line); color: var(--text);
+    border-radius: 6px; padding: 9px 10px; font: inherit; font-size: 12px; margin-bottom: 10px;
+  }
+  .card input:focus { outline: none; border-color: #2f4a63; }
+  .card button {
+    width: 100%; background: #10202e; border: 1px solid #2c4a63; color: #d7e8f7;
+    border-radius: 6px; padding: 9px 12px; font: inherit; font-size: 11px; letter-spacing: .1em; cursor: pointer;
+  }
+  .card button:hover { background: #142a3c; }
+  .toast {
+    position: fixed; right: 16px; bottom: 16px; z-index: 60;
+    background: #161019; border: 1px solid #5b2130; color: #ffd9df;
+    padding: 10px 14px; border-radius: 8px; font-size: 11px; display: none;
+  }
+  .toast.show { display: block; }
+  /* ---------- archive / trade history ---------- */
+  .folder-bar {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border-bottom: 1px solid var(--line); background: #080e14;
+  }
+  .folder-tab {
+    font-size: 10px; letter-spacing: .08em; color: #cfe2f5;
+    background: #0e1926; border: 1px solid #24384c; border-bottom: 0;
+    border-radius: 5px 5px 0 0; padding: 4px 9px;
+  }
+  .folder-stat { font-size: 10px; color: var(--dim); margin-left: auto; }
+  .folder-stat b { color: #b9cbe0; font-weight: 700; }
+  .mini {
+    background: #0d1620; border: 1px solid var(--line); color: var(--muted);
+    font: inherit; font-size: 9px; letter-spacing: .08em; padding: 3px 7px;
+    border-radius: 4px; cursor: pointer;
+  }
+  .mini:hover { color: #dbe9f6; border-color: #33506b; }
+  .ledger { max-height: 340px; overflow: auto; }
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 118px 84px 52px 78px minmax(70px, 1fr) minmax(70px, 1fr) 96px 66px;
+    gap: 8px; align-items: center; padding: 6px 12px;
+    border-bottom: 1px solid #0d141d; font-size: 11px; color: #b6c6d8;
+  }
+  .ledger-row:hover { background: #0a1118; }
+  .ledger-head {
+    position: sticky; top: 0; z-index: 1;
+    background: #090f16; border-bottom: 1px solid var(--line);
+    font-size: 9px; letter-spacing: .12em; color: var(--dim); text-transform: uppercase;
+  }
+  .ledger .epic { font-weight: 700; color: #e6eff8; }
+  .ledger .side { font-size: 9px; letter-spacing: .08em; padding: 2px 5px; border-radius: 3px; text-align: center; }
+  .ledger .side.buy { color: #052e1f; background: var(--emerald); }
+  .ledger .side.sell { color: #2e0710; background: var(--rose); }
+  .ledger .pnl.up { color: var(--emerald); font-weight: 700; }
+  .ledger .pnl.down { color: var(--rose); font-weight: 700; }
+  .ledger .st { font-size: 9px; letter-spacing: .08em; color: var(--dim); }
+  .ledger .st.open { color: var(--amber); }
+  .ledger .st.closed { color: var(--teal); }
+  .ledger .num { font-variant-numeric: tabular-nums; }
+  .ledger .dim { color: var(--dim); }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #1a2532; border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <span class="name">TRADING FIRM</span>
+      <span class="ver">OPERATIONS FLOOR</span>
+    </div>
+    <span class="pill"><span id="ws-dot" class="dot"></span><span id="ws-label">CONNECTING</span></span>
+    <span class="pill"><span id="mode-dot" class="dot ok"></span><span id="mode-label">PAPER</span></span>
+    <span class="pill"><span id="broker-dot" class="dot"></span><span id="broker-label">BROKER —</span></span>
+
+    <div class="spacer"></div>
+
+    <div class="metrics">
+      <div class="metric"><span class="k">BALANCE</span><span class="v" id="balance">—</span></div>
+      <div class="metric"><span class="k">EQUITY</span><span class="v" id="equity">—</span></div>
+      <div class="metric"><span class="k">OPEN P/L</span><span class="v" id="pnl">—</span></div>
+      <div class="metric"><span class="k">LESSONS</span><span class="v" id="lesson-count">0</span></div>
+      <div class="metric"><span class="k">LLM</span><span class="v" id="llm" style="font-size:11px">—</span></div>
+    </div>
+
+    <button class="kill" id="kill">■ KILL SWITCH</button>
+  </header>
+
+  <div class="grid-main">
+    <section class="panel">
+      <div class="panel-head">
+        <h2>OFFICE FLOOR</h2>
+        <span class="hint" id="floor-hint">live agents</span>
+      </div>
+      <div id="office-wrap"><canvas id="office"></canvas></div>
+      <div class="office-legend">
+        <span><b>click</b> a robot to inspect</span>
+        <span><b style="color:var(--amber)">amber visor</b> thinking</span>
+        <span><b style="color:var(--emerald)">green visor</b> learned</span>
+        <span><b style="color:var(--cyan)">typing</b> working</span>
+      </div>
+      <div class="panel-head" style="border-top:1px solid var(--line); border-bottom:0"><h2>STAFF</h2><span class="hint" id="staff-hint"></span></div>
+      <div class="panel-body"><div class="roster" id="roster"></div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>LIVE FEED</h2>
+        <div class="filters" id="filters">
+          <button data-f="all" class="on">ALL</button>
+          <button data-f="TRADE">TRADES</button>
+          <button data-f="THOUGHT">THINK</button>
+          <button data-f="LEARNED">LEARNED</button>
+          <button data-f="TASK">TASKS</button>
+        </div>
+      </div>
+      <div id="feed"><div class="empty">waiting for events…</div></div>
+    </section>
+  </div>
+
+  <div class="grid-bottom">
+    <section class="panel">
+      <div class="panel-head"><h2>TASK BOARD</h2><span class="hint" id="task-hint"></span></div>
+      <div class="panel-body"><div class="tasks" id="tasks"></div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>OPEN POSITIONS</h2><span class="hint" id="pos-hint">broker truth</span></div>
+      <div class="panel-body" id="positions" style="max-height:300px"><div class="empty">no open positions</div></div>
+    </section>
+  </div>
+
+  <div class="grid-bottom">
+    <section class="panel">
+      <div class="panel-head"><h2>LEARNED BY THE FIRM</h2><span class="hint">advisory notes only</span></div>
+      <div class="panel-body" id="lessons" style="max-height:280px"><div class="empty">no lessons yet</div></div>
+    </section>
+
+    <section class="panel" id="inspector">
+      <div class="panel-head"><h2>INSPECTOR</h2><span class="hint" id="inspector-hint">select an agent</span></div>
+      <div class="panel-body">
+        <div class="iname" id="i-name">—</div>
+        <div class="irow" id="i-meta"></div>
+        <div class="iact" id="i-act">Click a robot or a staff card to see what that agent is doing.</div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel" id="archive-panel">
+    <div class="panel-head">
+      <h2>TRADE HISTORY</h2>
+      <span class="hint" id="archive-hint">archive</span>
+    </div>
+    <div class="folder-bar">
+      <span class="folder-tab" id="archive-path">archiv/trades</span>
+      <span class="folder-stat" id="archive-stats">—</span>
+      <button class="mini" id="archive-refresh">REFRESH</button>
+    </div>
+    <div class="ledger" id="ledger">
+      <div class="ledger-row ledger-head">
+        <span>time</span><span>market</span><span>side</span><span>size</span>
+        <span>entry</span><span>exit</span><span>P/L</span><span>status</span>
+      </div>
+      <div class="empty" style="padding:10px 12px">no trades archived yet</div>
+    </div>
+  </section>
+</div>
+
+<div class="overlay" id="token-overlay">
+  <div class="card">
+    <h3>API TOKEN REQUIRED</h3>
+    <p>The firm API is protected. Enter the value of <b>FIRM_API_TOKEN</b> from your <b>.env</b>.</p>
+    <input id="token-input" type="password" placeholder="FIRM_API_TOKEN" autocomplete="off">
+    <button id="token-save">CONNECT</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  const state = {
+    token: "",
+    status: null,
+    agents: [],
+    tasks: [],
+    lessons: [],
+    archive: null,
+    events: [],
+    filter: "all",
+    connected: false,
+    selected: null,
+    lastEventByAgent: {},
+    pulses: [],
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const PALETTE = ["#38bdf8", "#34d399", "#fbbf24", "#a78bfa", "#fb7185", "#2dd4bf", "#f472b6", "#93c5fd"];
+  const TYPE_COLOR = {
+    THOUGHT: "var(--amber)",
+    RESULT: "var(--cyan)",
+    LEARNED: "var(--emerald)",
+    TASK_CREATED: "var(--dim)",
+    TASK_STARTED: "var(--cyan)",
+    TASK_COMPLETED: "var(--emerald)",
+    TASK_FAILED: "var(--rose)",
+    TASKS_REQUEUED: "var(--amber)",
+    ACCOUNT_SNAPSHOT: "var(--teal)",
+    ORDER_FILLED: "var(--violet)",
+    SIGNAL: "var(--violet)",
+    TRADE_REJECTED: "var(--rose)",
+    POSITION_CLOSED: "var(--teal)",
+    DESK_CYCLE: "var(--dim)",
+    TRADING_HALTED: "var(--rose)",
+    TOOL_CALL: "var(--cyan)",
+    TOOL_RESULT: "var(--muted)",
+  };
+  const TRADE_TYPES = ["SIGNAL", "ORDER_FILLED", "TRADE_REJECTED", "POSITION_CLOSED", "DESK_CYCLE", "TRADING_HALTED"];
+
+  const colorFor = (name) => {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return PALETTE[h % PALETTE.length];
+  };
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+
+  const parsePayload = (raw) => {
+    if (raw && typeof raw === "object") return raw;
+    try { return JSON.parse(raw || "{}"); } catch { return {}; }
+  };
+
+  const short = (s, n = 260) => {
+    const t = String(s ?? "").replace(/\s+/g, " ").trim();
+    return t.length > n ? t.slice(0, n) + "…" : t;
+  };
+
+  const timeOf = (ts) => {
+    const m = String(ts || "").match(/T(\d{2}:\d{2}:\d{2})/);
+    return m ? m[1] : "--:--:--";
+  };
+
+  const money = (v) => (v === null || v === undefined || isNaN(Number(v)))
+    ? "—"
+    : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const priceFmt = (v) => {
+    const n = Number(v);
+    if (!isFinite(n)) return "—";
+    return n >= 1000 ? n.toLocaleString("en-US", { maximumFractionDigits: 2 })
+                     : n.toFixed(n < 10 ? 5 : 2);
+  };
+
+  // ---------------------------------------------------------------- api
+  const authHeaders = () => state.token ? { Authorization: "Bearer " + state.token } : {};
+
+  async function api(path) {
+    const res = await fetch(path, { headers: authHeaders(), cache: "no-store" });
+    if (res.status === 401) { showTokenOverlay(); throw new Error("unauthorized"); }
+    if (!res.ok) throw new Error(path + " -> " + res.status);
+    return res.json();
+  }
+
+  function showTokenOverlay() {
+    $("token-overlay").classList.add("show");
+    $("token-input").focus();
+  }
+
+  function toast(msg) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove("show"), 5000);
+  }
+
+  // ---------------------------------------------------------------- data
+  async function loadAll() {
+    const [status, agents, tasks, lessons, archive] = await Promise.allSettled([
+      api("/api/status"), api("/api/agents"), api("/api/tasks"), api("/api/lessons"),
+      api("/api/archive?limit=200"),
+    ]);
+    if (status.status === "fulfilled") state.status = status.value;
+    if (agents.status === "fulfilled") state.agents = agents.value.agents || [];
+    if (tasks.status === "fulfilled") state.tasks = tasks.value.tasks || [];
+    if (lessons.status === "fulfilled") state.lessons = lessons.value.lessons || [];
+    if (archive.status === "fulfilled") state.archive = archive.value;
+    renderAll();
+  }
+
+  async function refreshArchive() {
+    try {
+      state.archive = await api("/api/archive?limit=200");
+      renderArchive();
+    } catch { /* transient */ }
+  }
+
+  async function refreshTasks() {
+    try {
+      const data = await api("/api/tasks");
+      state.tasks = data.tasks || [];
+      renderTasks();
+      renderTaskHint();
+      renderRoster();
+    } catch { /* transient */ }
+  }
+
+  async function refreshLessons() {
+    try {
+      const data = await api("/api/lessons");
+      state.lessons = data.lessons || [];
+      renderLessons();
+      renderLessonCount();
+      await refreshAgents();
+    } catch { /* transient */ }
+  }
+
+  async function refreshAgents() {
+    try {
+      const data = await api("/api/agents");
+      state.agents = data.agents || [];
+      renderRoster();
+      refreshFloor();
+    } catch { /* transient */ }
+  }
+
+  async function refreshStatus() {
+    try {
+      state.status = await api("/api/status");
+      renderHeader();
+      renderPositions();
+      renderLessonCount();
+    } catch { /* transient */ }
+  }
+
+  // ---------------------------------------------------------------- render
+  function renderAll() {
+    renderHeader();
+    renderRoster();
+    renderFeed();
+    renderTasks();
+    renderPositions();
+    renderLessons();
+    renderArchive();
+    renderLessonCount();
+    renderTaskHint();
+    refreshFloor();
+    renderInspector();
+  }
+
+  function renderHeader() {
+    const s = state.status || {};
+    $("mode-label").textContent = s.mode || "PAPER";
+    $("mode-dot").className = "dot " + (s.kill_switch_active ? "bad" : "ok");
+
+    const llm = s.llm_provider ? `${s.llm_provider} · ${s.llm_model || "?"}` : "—";
+    $("llm").textContent = llm;
+
+    $("balance").innerHTML = money(s.balance) === "—" ? "—" : `${money(s.balance)} <small>CHF</small>`;
+    $("equity").innerHTML = money(s.equity) === "—" ? "—" : `${money(s.equity)} <small>CHF</small>`;
+
+    const pnl = s.profit_loss;
+    const pnlEl = $("pnl");
+    if (pnl === null || pnl === undefined) {
+      pnlEl.textContent = "—";
+      pnlEl.className = "v";
+    } else {
+      const n = Number(pnl);
+      pnlEl.textContent = (n > 0 ? "+" : "") + money(n);
+      pnlEl.className = "v " + (n > 0 ? "up" : (n < 0 ? "down" : ""));
+    }
+
+    const brokerLive = s.account_source === "broker";
+    $("broker-dot").className = "dot " + (brokerLive ? "ok" : (s.account_source === "mock" ? "warn" : ""));
+    $("broker-label").textContent = brokerLive ? "CAPITAL.COM" : (s.account_source === "mock" ? "MOCK" : "BROKER —");
+  }
+
+  function renderLessonCount() {
+    const total = (state.status && state.status.lessons_learned) || state.lessons.length || 0;
+    $("lesson-count").textContent = String(total);
+  }
+
+  function runningSet() {
+    return new Set(state.tasks.filter((t) => t.status === "RUNNING").map((t) => t.assigned_to));
+  }
+
+  function agentState(name) {
+    const running = runningSet();
+    if (state.pulses.some((p) => p.agent === name && p.kind === "LEARNED" && Date.now() - p.at < 2200)) return "LEARNED";
+    const last = state.lastEventByAgent[name];
+    if (last && last.type === "THOUGHT" && Date.now() - (last._at || 0) < 12000) return "THINKING";
+    if (running.has(name)) return "RUNNING";
+    if (last && Date.now() - (last._at || 0) < 15000) return "RUNNING";
+    return "IDLE";
+  }
+
+  function renderRoster() {
+    const roster = $("roster");
+    if (!state.agents.length) {
+      roster.innerHTML = '<div class="empty">no agents loaded — check config/roles/*.yaml</div>';
+      return;
+    }
+    roster.innerHTML = "";
+    for (const a of state.agents) {
+      const st = agentState(a.name);
+      const label = st === "RUNNING" ? "RUNNING" : (st === "IDLE" ? "IDLE" : st);
+      const dotClass = st === "RUNNING" ? "warn" : (st === "IDLE" ? "" : "ok");
+      const card = document.createElement("div");
+      card.className = "agent" + (state.selected === a.name ? " selected" : "");
+      card.style.borderLeftColor = colorFor(a.name);
+      card.innerHTML = `
+        <div class="row1">
+          <span class="dot ${dotClass}"></span>
+          <span class="aname">${esc(a.name)}</span>
+          <span class="state">${label}</span>
+        </div>
+        <div class="role">${esc(a.role || "")}</div>
+        <div class="meta">
+          <span>lessons <b>${esc(a.lessons_learned ?? 0)}</b></span>
+          <span>model <b>${esc(a.model || "default")}</b></span>
+        </div>`;
+      card.addEventListener("click", () => selectAgent(a.name));
+      roster.appendChild(card);
+    }
+    $("staff-hint").textContent = state.agents.length + " active";
+  }
+
+  function feedMatches(evt) {
+    if (state.filter === "all") return true;
+    if (state.filter === "TASK") return String(evt.type || "").startsWith("TASK");
+    if (state.filter === "TRADE") return TRADE_TYPES.includes(evt.type);
+    return evt.type === state.filter;
+  }
+
+  function taskTitle(taskId) {
+    const task = state.tasks.find((t) => t.task_id === taskId);
+    return task ? task.title : taskId;
+  }
+
+  function eventText(evt) {
+    const p = parsePayload(evt.payload_json);
+    switch (evt.type) {
+      case "THOUGHT": return short(p.content || "");
+      case "RESULT": return short(p.deliverable || JSON.stringify(p));
+      case "LEARNED": return (p.lessons || []).map((l) => "• " + l).join(" ");
+      case "TASK_CREATED": return short(p.title || p.task_id);
+      case "TASK_STARTED": return short(p.title || taskTitle(p.task_id));
+      case "TASK_COMPLETED": return short(taskTitle(p.task_id));
+      case "TASK_FAILED": return short(p.error || taskTitle(p.task_id));
+      case "ACCOUNT_SNAPSHOT": return `balance ${money(p.balance)} · equity ${money(p.equity)} · ${p.open_positions ?? 0} open (${p.source || "?"})`;
+      case "SIGNAL": return `${p.side} ${p.epic} @ ${priceFmt(p.price)} · size ${p.size} · ${short(p.reason, 120)}`;
+      case "ORDER_FILLED": return `${p.side || ""} ${p.size ?? ""} ${p.epic || ""} filled @ ${priceFmt(p.price)}`;
+      case "TRADE_REJECTED": return `${p.epic}: ${short(p.reason, 150)}`;
+      case "POSITION_CLOSED": return `${p.epic} closed (${short(p.reason, 110)})`;
+      case "DESK_CYCLE": return `${(p.trades || []).length} new · ${(p.closed || []).length} closed · ${p.open_positions ?? 0} open`;
+      case "TRADING_HALTED": return short(p.reason, 160);
+      case "SYSTEM": return short(p.content || JSON.stringify(p));
+      default: return short(JSON.stringify(p));
+    }
+  }
+
+  function renderFeed() {
+    const feed = $("feed");
+    const rows = state.events.filter(feedMatches).slice(-90).reverse();
+    if (!rows.length) {
+      feed.innerHTML = '<div class="empty">waiting for events…</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const evt of rows) {
+      const row = document.createElement("div");
+      row.className = "feed-row";
+      const color = TYPE_COLOR[evt.type] || "var(--muted)";
+      row.style.borderLeftColor = color;
+      row.innerHTML = `
+        <span class="t">${timeOf(evt.ts)}</span>
+        <span class="a" title="${esc(evt.agent_id || "SYSTEM")}">${esc(evt.agent_id || "SYSTEM")}</span>
+        <span class="m"><span class="tag" style="color:${color}">${esc(evt.type)}</span>${esc(eventText(evt))}</span>`;
+      frag.appendChild(row);
+    }
+    feed.innerHTML = "";
+    feed.appendChild(frag);
+  }
+
+  function renderTasks() {
+    const groups = { PENDING: [], RUNNING: [], DONE: [], FAILED: [] };
+    for (const t of state.tasks) (groups[t.status] || groups.PENDING).push(t);
+    const board = $("tasks");
+    board.innerHTML = "";
+    for (const [status, list] of Object.entries(groups)) {
+      const col = document.createElement("div");
+      col.className = "col";
+      const items = list.slice(0, 5).map((t) => `
+        <div class="task ${status.toLowerCase()}">
+          <div class="tt">${esc(short(t.title || t.task_id, 90))}</div>
+          <div class="ta">${esc(t.assigned_to || "")}</div>
+        </div>`).join("");
+      col.innerHTML = `<h3>${status}<span>${list.length}</span></h3>${items || '<div class="empty">—</div>'}`;
+      board.appendChild(col);
+    }
+  }
+
+  function renderTaskHint() {
+    const c = { PENDING: 0, RUNNING: 0, DONE: 0, FAILED: 0 };
+    for (const t of state.tasks) if (c[t.status] !== undefined) c[t.status]++;
+    $("task-hint").textContent = `done ${c.DONE} · running ${c.RUNNING} · pending ${c.PENDING} · failed ${c.FAILED}`;
+  }
+
+  function renderPositions() {
+    const box = $("positions");
+    const list = (state.status && state.status.positions) || [];
+    $("pos-hint").textContent = list.length ? `${list.length} open` : "flat";
+    if (!list.length) {
+      box.innerHTML = '<div class="empty">no open positions — the desk is waiting for a signal</div>';
+      return;
+    }
+    box.innerHTML = "";
+    for (const p of list) {
+      const side = String(p.direction || "").toUpperCase();
+      const upl = (p.upl === null || p.upl === undefined) ? null : Number(p.upl);
+      const now = side === "BUY" ? p.bid : p.offer;
+      const stop = p.stop_level;
+      const el = document.createElement("div");
+      el.className = "pos";
+      el.innerHTML = `
+        <span class="epic">${esc(p.epic || "?")}</span>
+        <span class="side ${side === "BUY" ? "buy" : "sell"}">${esc(side || "?")}</span>
+        <span class="nums">size <b>${esc(p.volume ?? "?")}</b> · entry <b>${priceFmt(p.level)}</b>
+          ${now ? ` · now <b>${priceFmt(now)}</b>` : ""}
+          ${stop ? ` · stop <b>${priceFmt(stop)}</b>` : ""}</span>
+        <span class="upl ${upl === null ? "" : (upl >= 0 ? "up" : "down")}">${upl === null ? "—" : (upl > 0 ? "+" : "") + money(upl)}</span>`;
+      box.appendChild(el);
+    }
+  }
+
+  function renderLessons() {
+    const box = $("lessons");
+    const list = state.lessons.slice(0, 10);
+    if (!list.length) {
+      box.innerHTML = '<div class="empty">no lessons yet — agents learn after their first tasks</div>';
+      return;
+    }
+    box.innerHTML = "";
+    for (const l of list) {
+      const el = document.createElement("div");
+      el.className = "lesson";
+      const conf = Number(l.confidence ?? 0).toFixed(2);
+      el.innerHTML = `
+        <div class="lh">
+          <span class="dot" style="background:${colorFor(l.agent_id)}"></span>
+          <b>${esc(l.agent_id)}</b>
+          <span class="conf">conf ${conf} · used ${esc(l.applied_count ?? 0)}×</span>
+        </div>
+        <div class="lt">${esc(l.lesson)}</div>`;
+      box.appendChild(el);
+    }
+  }
+
+  function renderArchive() {
+    const data = state.archive || {};
+    const stats = data.stats || {};
+    const trades = (data.trades || []).slice().reverse();
+    const box = $("ledger");
+    const root = stats.root || "archiv";
+    $("archive-path").textContent = `${root.replace(/\\/g, "/")}/trades`;
+    $("archive-hint").textContent = data.available === false ? "archive offline" : "filing cabinet";
+
+    const closed = trades.filter((t) => t.status === "closed");
+    const realized = Number(stats.realized_profit);
+    const reported = Number(stats.trades_with_profit ?? 0);
+    // A closed trade without a broker-confirmed profit is not a 0.00 result.
+    const realizedTxt = reported > 0 && isFinite(realized)
+      ? `${realized > 0 ? "+" : ""}${money(realized)} CHF`
+      : "—";
+    const kb = stats.size_bytes ? (stats.size_bytes / 1024).toFixed(1) + " KiB" : "—";
+    $("archive-stats").innerHTML =
+      `<b>${stats.trades_total ?? trades.length}</b> fills · ` +
+      `<b>${stats.trades_closed ?? closed.length}</b> closed · ` +
+      `realized <b>${realizedTxt}</b> · ${esc(kb)} · ` +
+      `<b>${stats.compressed_files ?? 0}</b> compressed`;
+
+    const head = '<div class="ledger-row ledger-head">' +
+      "<span>time</span><span>market</span><span>side</span><span>size</span>" +
+      "<span>entry</span><span>exit</span><span>P/L</span><span>status</span></div>";
+
+    if (!trades.length) {
+      box.innerHTML = head + '<div class="empty" style="padding:10px 12px">' +
+        (data.available === false
+          ? "archive not available in this process"
+          : "no trades archived yet — the desk files every signal and fill here") +
+        "</div>";
+      return;
+    }
+
+    const rows = trades.map((t) => {
+      const side = String(t.side || "").toUpperCase();
+      const pnl = (t.profit === null || t.profit === undefined) ? null : Number(t.profit);
+      const pnlTxt = pnl === null || !isFinite(pnl)
+        ? "—"
+        : `${pnl > 0 ? "+" : ""}${money(pnl)} ${t.profit_currency || ""}`.trim();
+      const pnlCls = pnl === null ? "dim" : (pnl >= 0 ? "up" : "down");
+      const status = t.status === "closed" ? "closed" : "open";
+      return '<div class="ledger-row" title="deal ' + esc(t.deal_id || "?") +
+        (t.close_reason ? " · " + esc(t.close_reason) : "") + '">' +
+        `<span class="num dim">${esc(fmtTime(t.time))}</span>` +
+        `<span class="epic">${esc(t.epic || "?")}</span>` +
+        `<span class="side ${side === "BUY" ? "buy" : "sell"}">${esc(side || "?")}</span>` +
+        `<span class="num">${esc(t.size ?? "—")}</span>` +
+        `<span class="num">${priceFmt(t.entry)}</span>` +
+        `<span class="num">${t.exit === null || t.exit === undefined ? "—" : priceFmt(t.exit)}</span>` +
+        `<span class="pnl ${pnlCls}">${esc(pnlTxt)}</span>` +
+        `<span class="st ${status}">${status}</span>` +
+        "</div>";
+    }).join("");
+
+    box.innerHTML = head + rows;
+  }
+
+  const fmtTime = (ts) => {
+    const s = String(ts || "");
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    return m ? `${m[3]}.${m[2]} ${m[4]}:${m[5]}` : (s.slice(0, 16) || "—");
+  };
+
+  function selectAgent(name) {
+    state.selected = name;
+    renderRoster();
+    renderInspector();
+  }
+
+  function renderInspector() {
+    const a = state.agents.find((x) => x.name === state.selected);
+    if (!a) {
+      $("i-name").textContent = "—";
+      $("i-meta").innerHTML = "";
+      $("i-act").textContent = "Click a robot or a staff card to see what that agent is doing.";
+      $("inspector-hint").textContent = "select an agent";
+      return;
+    }
+    const last = state.lastEventByAgent[a.name];
+    $("i-name").textContent = a.name;
+    $("i-meta").innerHTML = `
+      <span>role <b>${esc(a.role || "—")}</b></span>
+      <span>model <b>${esc(a.model || "default")}</b></span>
+      <span>reports to <b>${esc(a.reporting_line || "—")}</b></span>
+      <span>lessons <b>${esc(a.lessons_learned ?? 0)}</b></span>`;
+    $("i-act").textContent = last
+      ? `${last.type}: ${eventText(last)}`
+      : "No activity recorded yet in this session.";
+    $("inspector-hint").textContent = "live";
+  }
+
+  // ============================================================ OFFICE FLOOR
+  const canvas = $("office");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0;
+  let desks = [];
+  let hover = null;
+  let bgCache = null;
+  let layoutKey = "";
+  let pointer = { x: 0.5, y: 0.5 };
+  let parX = 0, parY = 0;
+
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  function refreshFloor() {
+    layoutKey = "";
+    syncCanvasHeight();
+    layoutFloor();
+    draw();
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    const rr = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
+    c.beginPath();
+    c.moveTo(x + rr, y);
+    c.arcTo(x + w, y, x + w, y + h, rr);
+    c.arcTo(x + w, y + h, x, y + h, rr);
+    c.arcTo(x, y + h, x, y, rr);
+    c.arcTo(x, y, x + w, y, rr);
+    c.closePath();
+  }
+
+  function hexA(hex, a) {
+    const h = hex.replace("#", "");
+    const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = Math.max(1, rect.width);
+    H = Math.max(1, rect.height);
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    bgCache = null;
+    layoutFloor();
+    draw();
+  }
+
+  function syncCanvasHeight() {
+    const n = Math.max(state.agents.length, 1);
+    const cols = n <= 4 ? n : Math.ceil(n / 2);
+    const rows = Math.ceil(n / cols);
+    const h = clamp(Math.round(window.innerWidth * 0.40), rows > 1 ? 400 : 310, 440);
+    const next = h + "px";
+    if (canvas.style.height !== next) canvas.style.height = next;
+  }
+
+  function layoutFloor() {
+    const n = Math.max(state.agents.length, 1);
+    const cols = n <= 4 ? n : Math.ceil(n / 2);
+    const rows = Math.ceil(n / cols);
+    const agents = state.agents;
+
+    const key = `${n}|${W}|${H}|${agents.map((a) => a.name).join(",")}`;
+    if (key === layoutKey) return;
+    layoutKey = key;
+    bgCache = null;
+
+    const margin = Math.min(46, W * 0.05);
+    const usable = W - margin * 2;
+    const deskW = Math.min(240, (usable / cols) * 0.82);
+    const rowGap = rows > 1 ? H * 0.195 : 0;
+    const baseY = rows > 1 ? H * 0.615 : H * 0.70;
+
+    desks = agents.map((a, i) => {
+      const row = Math.floor(i / cols);
+      const col = i % cols;
+      const inRow = row === 0 ? Math.min(cols, n) : n - cols;
+      const rowWidth = inRow * (usable / cols);
+      const startX = W / 2 - rowWidth / 2 + (usable / cols) / 2;
+      return {
+        name: a.name,
+        role: a.role,
+        color: colorFor(a.name),
+        x: startX + col * (usable / cols),
+        y: baseY + row * rowGap,
+        w: deskW * (row === 0 && rows > 1 ? 0.84 : 1),
+        row,
+        seed: (a.name.charCodeAt(0) + a.name.length * 7) % 100,
+      };
+    });
+  }
+
+  // ------------------------------------------------------------ background
+  const PAD = 26;
+
+  function buildBackground() {
+    const off = document.createElement("canvas");
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    off.width = Math.floor((W + PAD * 2) * dpr);
+    off.height = Math.floor((H + PAD * 2) * dpr);
+    const c = off.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.translate(PAD, PAD);
+
+    const horizon = H * 0.62;
+    const backL = W * 0.085;
+    const backR = W * 0.915;
+    const backT = H * 0.13;
+    const vpX = W / 2;
+    const vpY = horizon * 0.62;
+
+    c.fillStyle = "#04070b";
+    c.fillRect(-PAD, -PAD, W + PAD * 2, H + PAD * 2);
+
+    // ---- ceiling: a receding plane above the back wall
+    const ceil = c.createLinearGradient(0, 0, 0, backT);
+    ceil.addColorStop(0, "#070d14");
+    ceil.addColorStop(1, "#0a131c");
+    c.fillStyle = ceil;
+    c.beginPath();
+    c.moveTo(-PAD, -PAD);
+    c.lineTo(W + PAD, -PAD);
+    c.lineTo(backR, backT);
+    c.lineTo(backL, backT);
+    c.closePath();
+    c.fill();
+
+    // recessed ceiling light strips, receding to the back wall
+    for (let i = 0; i < 4; i++) {
+      const fx = W * (0.24 + i * 0.175);
+      const bx = vpX + (fx - vpX) * 0.42;
+      const halfF = W * 0.026;
+      const halfB = halfF * 0.42;
+      const lg = c.createLinearGradient(0, -PAD, 0, backT);
+      lg.addColorStop(0, "rgba(150,205,255,0.16)");
+      lg.addColorStop(1, "rgba(150,205,255,0.03)");
+      c.fillStyle = lg;
+      c.beginPath();
+      c.moveTo(fx - halfF, -PAD);
+      c.lineTo(fx + halfF, -PAD);
+      c.lineTo(bx + halfB, backT - 2);
+      c.lineTo(bx - halfB, backT - 2);
+      c.closePath();
+      c.fill();
+      // fixture
+      c.fillStyle = "rgba(196,228,255,0.22)";
+      c.fillRect(bx - halfB, backT - 6, halfB * 2, 3);
+    }
+
+    // ---- side walls (left and right), converging to the back wall
+    const leftWall = c.createLinearGradient(0, 0, backL, horizon);
+    leftWall.addColorStop(0, "#05090e");
+    leftWall.addColorStop(0.55, "#08101a");
+    leftWall.addColorStop(1, "#0a141e");
+    c.fillStyle = leftWall;
+    c.beginPath();
+    c.moveTo(-PAD, -PAD);
+    c.lineTo(backL, backT);
+    c.lineTo(backL, horizon);
+    c.lineTo(-PAD, H * 1.06);
+    c.closePath();
+    c.fill();
+
+    const rightWall = c.createLinearGradient(W, 0, backR, horizon);
+    rightWall.addColorStop(0, "#05090e");
+    rightWall.addColorStop(0.55, "#08101a");
+    rightWall.addColorStop(1, "#0a141e");
+    c.fillStyle = rightWall;
+    c.beginPath();
+    c.moveTo(W + PAD, -PAD);
+    c.lineTo(backR, backT);
+    c.lineTo(backR, horizon);
+    c.lineTo(W + PAD, H * 1.06);
+    c.closePath();
+    c.fill();
+
+    // wall panel seams, all pointing at the vanishing point
+    c.strokeStyle = "rgba(90,130,170,0.06)";
+    c.lineWidth = 1;
+    for (let i = 1; i <= 5; i++) {
+      const t = i / 6;
+      c.beginPath();
+      c.moveTo(backL, backT + (horizon - backT) * t);
+      c.lineTo(-PAD, vpY + (horizon * 1.06 - vpY) * t * 1.35);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(backR, backT + (horizon - backT) * t);
+      c.lineTo(W + PAD, vpY + (horizon * 1.06 - vpY) * t * 1.35);
+      c.stroke();
+    }
+
+    // ---- back wall
+    const wall = c.createLinearGradient(0, backT, 0, horizon);
+    wall.addColorStop(0, "#101d2a");
+    wall.addColorStop(0.55, "#0c1723");
+    wall.addColorStop(1, "#080f17");
+    c.fillStyle = wall;
+    c.fillRect(backL, backT, backR - backL, horizon - backT);
+
+    // back wall seams
+    c.strokeStyle = "rgba(90,130,170,0.05)";
+    for (let x = backL; x < backR; x += 62) {
+      c.beginPath(); c.moveTo(x, backT); c.lineTo(x, horizon); c.stroke();
+    }
+    c.strokeStyle = "rgba(90,130,170,0.08)";
+    c.beginPath(); c.moveTo(backL, horizon - 44); c.lineTo(backR, horizon - 44); c.stroke();
+
+    // corner shading where the walls meet
+    const cl = c.createLinearGradient(backL, 0, backL + 46, 0);
+    cl.addColorStop(0, "rgba(0,0,0,0.55)");
+    cl.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = cl;
+    c.fillRect(backL, backT, 46, horizon - backT);
+    const cr = c.createLinearGradient(backR, 0, backR - 46, 0);
+    cr.addColorStop(0, "rgba(0,0,0,0.55)");
+    cr.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = cr;
+    c.fillRect(backR - 46, backT, 46, horizon - backT);
+
+    // ---- windows on the back wall
+    const winCount = W > 760 ? 3 : 2;
+    const winW = Math.min(190, ((backR - backL) * 0.74) / winCount);
+    const winH = Math.min((horizon - backT) * 0.62, 170);
+    const gap = 24;
+    const totalW = winCount * winW + (winCount - 1) * gap;
+    const startX = vpX - totalW / 2;
+    const winY = backT + (horizon - backT) * 0.17;
+
+    // ambient light spilling out of the windows into the room
+    const amb = c.createRadialGradient(vpX, winY + winH * 0.5, 10, vpX, winY + winH * 0.5, W * 0.55);
+    amb.addColorStop(0, "rgba(96,156,214,0.13)");
+    amb.addColorStop(1, "rgba(96,156,214,0)");
+    c.fillStyle = amb;
+    c.fillRect(backL, backT, backR - backL, horizon - backT);
+
+    for (let i = 0; i < winCount; i++) {
+      drawWindow(c, startX + i * (winW + gap), winY, winW, winH, i);
+    }
+
+    // ---- floor
+    const floor = c.createLinearGradient(0, horizon, 0, H);
+    floor.addColorStop(0, "#0c1620");
+    floor.addColorStop(0.35, "#0a1119");
+    floor.addColorStop(1, "#04070b");
+    c.fillStyle = floor;
+    c.fillRect(-PAD, horizon, W + PAD * 2, H - horizon + PAD);
+
+    // glossy strip just under the wall (wet-floor reflection)
+    const gloss = c.createLinearGradient(0, horizon, 0, horizon + 90);
+    gloss.addColorStop(0, "rgba(90,160,220,0.13)");
+    gloss.addColorStop(0.45, "rgba(70,130,190,0.05)");
+    gloss.addColorStop(1, "rgba(70,130,190,0)");
+    c.fillStyle = gloss;
+    c.fillRect(-PAD, horizon, W + PAD * 2, 90);
+
+    // floor perspective grid
+    c.strokeStyle = "rgba(56,189,248,0.07)";
+    c.lineWidth = 1;
+    for (let i = -14; i <= 14; i++) {
+      c.beginPath();
+      c.moveTo(vpX + i * 12, horizon);
+      c.lineTo(vpX + i * 92, H + 20);
+      c.stroke();
+    }
+    for (let i = 1; i <= 7; i++) {
+      const t = i / 7;
+      const y = horizon + Math.pow(t, 2.1) * (H - horizon) * 1.15;
+      c.globalAlpha = 0.5 + t * 0.5;
+      c.beginPath(); c.moveTo(-PAD, y); c.lineTo(W + PAD, y); c.stroke();
+    }
+    c.globalAlpha = 1;
+
+    // wall/floor shadow line
+    const shadow = c.createLinearGradient(0, horizon - 18, 0, horizon + 26);
+    shadow.addColorStop(0, "rgba(0,0,0,0)");
+    shadow.addColorStop(0.6, "rgba(0,0,0,0.55)");
+    shadow.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = shadow;
+    c.fillRect(backL, horizon - 18, backR - backL, 44);
+
+    // baseboard LED strip along the back wall
+    const strip = c.createLinearGradient(backL, 0, backR, 0);
+    strip.addColorStop(0, "rgba(56,189,248,0)");
+    strip.addColorStop(0.5, "rgba(56,189,248,0.55)");
+    strip.addColorStop(1, "rgba(56,189,248,0)");
+    c.fillStyle = strip;
+    c.fillRect(backL, horizon - 3, backR - backL, 2);
+    c.shadowColor = "rgba(56,189,248,0.7)";
+    c.shadowBlur = 12;
+    c.fillRect(backL, horizon - 3, backR - backL, 2);
+    c.shadowBlur = 0;
+
+    // corner decor: server rack left, plants right
+    drawServerRack(c, backL + 10, horizon - 96);
+    drawPlant(c, backR - 26, horizon - 4);
+    drawPlant(c, 26, horizon + 30);
+
+    // vignette
+    const vg = c.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.35, W / 2, H * 0.5, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,0,0.62)");
+    c.fillStyle = vg;
+    c.fillRect(-PAD, -PAD, W + PAD * 2, H + PAD * 2);
+
+    return off;
+  }
+
+  function drawWindow(c, x, y, w, h, seed) {
+    // frame
+    c.fillStyle = "#0c141d";
+    roundRect(c, x - 6, y - 6, w + 12, h + 12, 6); c.fill();
+    c.strokeStyle = "#1a2735"; c.lineWidth = 1;
+    roundRect(c, x - 6, y - 6, w + 12, h + 12, 6); c.stroke();
+
+    // glass
+    const glass = c.createLinearGradient(x, y, x, y + h);
+    glass.addColorStop(0, "#123a5c");
+    glass.addColorStop(0.55, "#0c2238");
+    glass.addColorStop(1, "#071019");
+    c.fillStyle = glass;
+    c.fillRect(x, y, w, h);
+
+    // skyline
+    const baseY = y + h;
+    let px = x;
+    let i = 0;
+    while (px < x + w) {
+      const bw = 10 + ((seed * 13 + i * 29) % 26);
+      const bh = 18 + ((seed * 31 + i * 47) % Math.floor(h * 0.55));
+      c.fillStyle = "#050a11";
+      c.fillRect(px, baseY - bh, Math.min(bw, x + w - px), bh);
+
+      // lit windows
+      c.fillStyle = "rgba(251,191,36,0.42)";
+      for (let wy = baseY - bh + 5; wy < baseY - 4; wy += 7) {
+        for (let wx = px + 3; wx < px + Math.min(bw, x + w - px) - 3; wx += 6) {
+          if (((wx + wy + seed * 17) | 0) % 5 === 0) c.fillRect(wx, wy, 2, 3);
+        }
+      }
+      px += Math.min(bw, x + w - px) + 4;
+      i++;
+    }
+
+    // moon glow
+    const moonX = x + w * (0.68 + seed * 0.06);
+    const moonY = y + h * 0.22;
+    const mg = c.createRadialGradient(moonX, moonY, 1, moonX, moonY, 42);
+    mg.addColorStop(0, "rgba(219,234,254,0.55)");
+    mg.addColorStop(1, "rgba(219,234,254,0)");
+    c.fillStyle = mg;
+    c.beginPath(); c.arc(moonX, moonY, 42, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "rgba(226,240,255,0.75)";
+    c.beginPath(); c.arc(moonX, moonY, 6, 0, Math.PI * 2); c.fill();
+
+    // mullion
+    c.fillStyle = "#0b131c";
+    c.fillRect(x + w / 2 - 2, y, 4, h);
+
+    // glass reflection
+    c.save();
+    c.beginPath(); c.rect(x, y, w, h); c.clip();
+    const refl = c.createLinearGradient(x, y, x + w, y + h);
+    refl.addColorStop(0, "rgba(180,220,255,0.07)");
+    refl.addColorStop(0.35, "rgba(180,220,255,0.01)");
+    refl.addColorStop(1, "rgba(180,220,255,0.05)");
+    c.fillStyle = refl;
+    c.fillRect(x, y, w, h);
+    c.restore();
+  }
+
+  function drawServerRack(c, x, y) {
+    const w = 44, h = 92;
+    c.fillStyle = "#0a1017";
+    roundRect(c, x, y, w, h, 4); c.fill();
+    c.strokeStyle = "#1c2a3a"; c.lineWidth = 1;
+    roundRect(c, x, y, w, h, 4); c.stroke();
+    for (let i = 0; i < 9; i++) {
+      const ly = y + 8 + i * 9;
+      c.fillStyle = "#0e1721";
+      c.fillRect(x + 5, ly, w - 10, 6);
+      const on = (i * 7 + 3) % 4 !== 0;
+      c.fillStyle = on ? "rgba(52,211,153,0.85)" : "rgba(56,189,248,0.5)";
+      c.fillRect(x + w - 11, ly + 2, 2.5, 2.5);
+    }
+  }
+
+  function drawPlant(c, x, y) {
+    // pot
+    c.fillStyle = "#13202c";
+    c.beginPath();
+    c.moveTo(x - 14, y - 18);
+    c.lineTo(x + 14, y - 18);
+    c.lineTo(x + 10, y);
+    c.lineTo(x - 10, y);
+    c.closePath(); c.fill();
+    c.strokeStyle = "#1d2d3d"; c.stroke();
+    // leaves
+    c.strokeStyle = "#1f7a5a";
+    c.lineWidth = 2;
+    for (let i = 0; i < 7; i++) {
+      const a = -Math.PI / 2 + (i - 3) * 0.32;
+      const len = 22 + (i % 3) * 8;
+      c.beginPath();
+      c.moveTo(x, y - 18);
+      c.quadraticCurveTo(x + Math.cos(a) * len * 0.6, y - 30 - Math.sin(a) * len * 0.5,
+                         x + Math.cos(a) * len, y - 34 - Math.sin(a) * len);
+      c.stroke();
+    }
+  }
+
+  // ---------------------------------------------------------------- robots
+  function drawRobot(c, d, t, st) {
+    const s = d.w * 0.44;
+    const x = d.x;
+    const y = d.y;                 // desk surface line
+    const breathe = Math.sin(t / 1100 + d.seed) * s * 0.012;
+    const thinking = st === "THINKING";
+    const learned = st === "LEARNED";
+    const working = st === "RUNNING";
+    const accent = learned ? "#34d399" : (thinking ? "#fbbf24" : d.color);
+
+    // chair back
+    c.fillStyle = "#0a1119";
+    roundRect(c, x - s * 0.62, y - s * 1.62, s * 1.24, s * 1.42, s * 0.16);
+    c.fill();
+    c.strokeStyle = "#16202c";
+    c.lineWidth = 1;
+    c.stroke();
+
+    // shoulder glow / ambient light from monitor
+    const glow = c.createRadialGradient(x, y - s * 1.05, 2, x, y - s * 1.05, s * 1.15);
+    glow.addColorStop(0, hexA(accent, learned ? 0.28 : (thinking ? 0.18 : 0.10)));
+    glow.addColorStop(1, hexA(accent, 0));
+    c.fillStyle = glow;
+    c.beginPath(); c.arc(x, y - s * 1.05, s * 1.15, 0, Math.PI * 2); c.fill();
+
+    const torsoY = y - s * 0.98 + breathe;
+    const torsoW = s * 0.86;
+    const torsoH = s * 0.78;
+
+    // arms (behind torso, reaching the keyboard)
+    const typePhase = Math.sin(t / 120 + d.seed);
+    const leftHand = { x: x - s * 0.34, y: y - s * 0.16 + (working ? typePhase * s * 0.03 : 0) };
+    const rightHand = { x: x + s * 0.34, y: y - s * 0.16 - (working ? typePhase * s * 0.03 : 0) };
+
+    c.strokeStyle = "#25313f";
+    c.lineWidth = s * 0.17;
+    c.lineCap = "round";
+    c.beginPath();
+    c.moveTo(x - torsoW * 0.52, torsoY - torsoH * 0.28);
+    c.quadraticCurveTo(x - s * 0.62, torsoY + s * 0.1, leftHand.x, leftHand.y);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(x + torsoW * 0.52, torsoY - torsoH * 0.28);
+    c.quadraticCurveTo(x + s * 0.62, torsoY + s * 0.1, rightHand.x, rightHand.y);
+    c.stroke();
+
+    // hands
+    c.fillStyle = "#2d3b4c";
+    c.beginPath(); c.arc(leftHand.x, leftHand.y, s * 0.075, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.arc(rightHand.x, rightHand.y, s * 0.075, 0, Math.PI * 2); c.fill();
+
+    // torso
+    const bodyGrad = c.createLinearGradient(0, torsoY - torsoH * 0.6, 0, torsoY + torsoH * 0.5);
+    bodyGrad.addColorStop(0, "#37485c");
+    bodyGrad.addColorStop(0.55, "#233040");
+    bodyGrad.addColorStop(1, "#131b25");
+    c.fillStyle = bodyGrad;
+    roundRect(c, x - torsoW / 2, torsoY - torsoH * 0.55, torsoW, torsoH, s * 0.18);
+    c.fill();
+    c.strokeStyle = hexA(d.color, 0.35);
+    c.lineWidth = 1;
+    c.stroke();
+
+    // chest plate + LED
+    c.fillStyle = "rgba(8,14,20,0.85)";
+    roundRect(c, x - torsoW * 0.26, torsoY - torsoH * 0.34, torsoW * 0.52, torsoH * 0.34, s * 0.06);
+    c.fill();
+    const ledPulse = 0.55 + 0.45 * Math.sin(t / (working ? 260 : 900) + d.seed);
+    c.fillStyle = hexA(accent, 0.35 + ledPulse * 0.55);
+    c.shadowColor = hexA(accent, 0.9);
+    c.shadowBlur = s * 0.16;
+    c.beginPath(); c.arc(x, torsoY - torsoH * 0.16, s * 0.052, 0, Math.PI * 2); c.fill();
+    c.shadowBlur = 0;
+
+    // neck
+    c.fillStyle = "#1b2532";
+    roundRect(c, x - s * 0.10, torsoY - torsoH * 0.66, s * 0.20, s * 0.16, s * 0.04);
+    c.fill();
+
+    // head
+    const headW = s * 0.78;
+    const headH = s * 0.60;
+    const headY = torsoY - torsoH * 0.62 - headH * 0.82 + (thinking ? Math.sin(t / 420) * s * 0.014 : 0);
+
+    const headGrad = c.createLinearGradient(0, headY, 0, headY + headH);
+    headGrad.addColorStop(0, "#41546a");
+    headGrad.addColorStop(0.5, "#2a3848");
+    headGrad.addColorStop(1, "#1a2431");
+    c.fillStyle = headGrad;
+    roundRect(c, x - headW / 2, headY, headW, headH, s * 0.15);
+    c.fill();
+    c.strokeStyle = "rgba(150,185,220,0.18)";
+    c.lineWidth = 1;
+    c.stroke();
+
+    // ear pods
+    c.fillStyle = hexA(d.color, 0.55);
+    roundRect(c, x - headW / 2 - s * 0.05, headY + headH * 0.32, s * 0.08, headH * 0.30, s * 0.03);
+    c.fill();
+    roundRect(c, x + headW / 2 - s * 0.03, headY + headH * 0.32, s * 0.08, headH * 0.30, s * 0.03);
+    c.fill();
+
+    // visor
+    const visorW = headW * 0.78;
+    const visorH = headH * 0.44;
+    const visorX = x - visorW / 2;
+    const visorY = headY + headH * 0.20;
+    const visorGrad = c.createLinearGradient(0, visorY, 0, visorY + visorH);
+    visorGrad.addColorStop(0, "#04080d");
+    visorGrad.addColorStop(1, "#0b1620");
+    c.fillStyle = visorGrad;
+    roundRect(c, visorX, visorY, visorW, visorH, s * 0.07);
+    c.fill();
+    c.strokeStyle = hexA(accent, 0.35);
+    c.lineWidth = 1;
+    c.stroke();
+
+    // eyes
+    const blink = Math.sin(t / 2600 + d.seed) > 0.985;
+    const eyeH = blink ? visorH * 0.10 : visorH * 0.34;
+    const eyeW = visorW * 0.20;
+    const eyeY = visorY + (visorH - eyeH) / 2;
+    c.shadowColor = hexA(accent, 0.95);
+    c.shadowBlur = s * 0.18;
+    c.fillStyle = hexA(accent, 0.95);
+    roundRect(c, x - visorW * 0.24, eyeY, eyeW, eyeH, eyeW * 0.4); c.fill();
+    roundRect(c, x + visorW * 0.04, eyeY, eyeW, eyeH, eyeW * 0.4); c.fill();
+    c.shadowBlur = 0;
+
+    // antenna
+    c.strokeStyle = "#2b3a4b";
+    c.lineWidth = Math.max(1, s * 0.035);
+    c.beginPath();
+    c.moveTo(x, headY);
+    c.lineTo(x, headY - s * 0.20);
+    c.stroke();
+    const antPulse = 0.4 + 0.6 * Math.abs(Math.sin(t / (working ? 420 : 1100) + d.seed));
+    c.fillStyle = hexA(accent, antPulse);
+    c.shadowColor = hexA(accent, 0.9);
+    c.shadowBlur = s * 0.2;
+    c.beginPath(); c.arc(x, headY - s * 0.22, s * 0.045, 0, Math.PI * 2); c.fill();
+    c.shadowBlur = 0;
+
+    // thinking bubble
+    if (thinking) {
+      const bx = x + headW * 0.58;
+      const by = headY - s * 0.30;
+      c.fillStyle = "rgba(12,20,29,0.92)";
+      c.strokeStyle = "rgba(251,191,36,0.5)";
+      c.lineWidth = 1;
+      roundRect(c, bx, by, s * 0.46, s * 0.24, s * 0.08);
+      c.fill(); c.stroke();
+      for (let i = 0; i < 3; i++) {
+        const a = 0.35 + 0.65 * Math.max(0, Math.sin(t / 260 - i * 0.7));
+        c.fillStyle = `rgba(251,191,36,${a})`;
+        c.beginPath(); c.arc(bx + s * (0.12 + i * 0.11), by + s * 0.12, s * 0.022, 0, Math.PI * 2); c.fill();
+      }
+    }
+
+    // learned flash
+    if (learned) {
+      const p = state.pulses.find((q) => q.agent === d.name && q.kind === "LEARNED");
+      const age = p ? (Date.now() - p.at) / 2200 : 1;
+      c.strokeStyle = `rgba(52,211,153,${(1 - age) * 0.8})`;
+      c.lineWidth = 2;
+      c.beginPath();
+      c.arc(x, headY + headH / 2, headW * (0.65 + age * 0.55), 0, Math.PI * 2);
+      c.stroke();
+    }
+  }
+
+  // ------------------------------------------------------------------ desk
+  function drawDesk(c, d, t, st) {
+    const x = d.x, y = d.y, w = d.w;
+    const topH = Math.max(6, w * 0.035);
+    const panelH = w * 0.24;
+
+    // floor shadow
+    const sh = c.createRadialGradient(x, y + panelH * 0.9, 4, x, y + panelH * 0.9, w * 0.62);
+    sh.addColorStop(0, "rgba(0,0,0,0.55)");
+    sh.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = sh;
+    c.beginPath();
+    c.ellipse(x, y + panelH * 0.9, w * 0.62, w * 0.11, 0, 0, Math.PI * 2);
+    c.fill();
+
+    // glossy floor reflection under the desk (sells the depth)
+    const refl = c.createLinearGradient(0, y + panelH * 0.6, 0, y + panelH * 2.6);
+    refl.addColorStop(0, hexA(d.color, 0.12));
+    refl.addColorStop(0.5, hexA(d.color, 0.04));
+    refl.addColorStop(1, hexA(d.color, 0));
+    c.fillStyle = refl;
+    c.beginPath();
+    c.moveTo(x - w * 0.30, y + panelH * 0.7);
+    c.lineTo(x + w * 0.30, y + panelH * 0.7);
+    c.lineTo(x + w * 0.48, y + panelH * 2.6);
+    c.lineTo(x - w * 0.48, y + panelH * 2.6);
+    c.closePath();
+    c.fill();
+
+    // desk top (slight perspective)
+    const inset = w * 0.03;
+    const topGrad = c.createLinearGradient(0, y, 0, y + topH);
+    topGrad.addColorStop(0, "#22303f");
+    topGrad.addColorStop(1, "#182430");
+    c.fillStyle = topGrad;
+    c.beginPath();
+    c.moveTo(x - w / 2 + inset, y);
+    c.lineTo(x + w / 2 - inset, y);
+    c.lineTo(x + w / 2, y + topH);
+    c.lineTo(x - w / 2, y + topH);
+    c.closePath();
+    c.fill();
+
+    // front panel
+    const panelGrad = c.createLinearGradient(0, y + topH, 0, y + topH + panelH);
+    panelGrad.addColorStop(0, "#101a24");
+    panelGrad.addColorStop(1, "#0a1119");
+    c.fillStyle = panelGrad;
+    c.fillRect(x - w / 2, y + topH, w, panelH);
+
+    // accent trim
+    c.fillStyle = hexA(d.color, state.selected === d.name ? 0.95 : 0.5);
+    c.fillRect(x - w / 2, y + topH, w, Math.max(2, topH * 0.28));
+
+    // name plate
+    c.fillStyle = "rgba(6,11,16,0.85)";
+    roundRect(c, x - w * 0.19, y + topH + panelH * 0.18, w * 0.38, panelH * 0.34, 3);
+    c.fill();
+    c.strokeStyle = hexA(d.color, 0.4);
+    c.lineWidth = 1;
+    c.stroke();
+
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.fillStyle = state.selected === d.name ? "#eaf4ff" : "#a8bccf";
+    c.font = `600 ${Math.max(8, w * 0.060)}px ui-monospace, monospace`;
+    c.fillText(d.name, x, y + topH + panelH * 0.35);
+
+    c.fillStyle = "#556a80";
+    c.font = `${Math.max(7, w * 0.042)}px ui-monospace, monospace`;
+    c.fillText(short(d.role || "", 26), x, y + topH + panelH * 0.80);
+    c.textBaseline = "alphabetic";
+
+    // status LED on the panel
+    const ledColor = st === "RUNNING" ? "#38bdf8" : (st === "THINKING" ? "#fbbf24" : (st === "LEARNED" ? "#34d399" : "#2a3646"));
+    c.fillStyle = ledColor;
+    c.shadowColor = ledColor;
+    c.shadowBlur = st === "IDLE" ? 0 : 6;
+    c.beginPath();
+    c.arc(x + w * 0.42, y + topH + panelH * 0.32, Math.max(1.6, w * 0.014), 0, Math.PI * 2);
+    c.fill();
+    c.shadowBlur = 0;
+
+    // monitor (left of centre so the robot stays visible)
+    const mw = w * 0.40;
+    const mh = mw * 0.60;
+    const mx = x - w * 0.34;
+    const my = y - mh - topH * 0.4;
+
+    // monitor stand
+    c.fillStyle = "#0c141c";
+    c.fillRect(mx + mw / 2 - mw * 0.06, y - mh * 0.18, mw * 0.12, mh * 0.22);
+    c.fillRect(mx + mw * 0.30, y - 2, mw * 0.40, Math.max(2, topH * 0.4));
+
+    // monitor body
+    c.fillStyle = "#080d13";
+    roundRect(c, mx, my, mw, mh, 3);
+    c.fill();
+    c.strokeStyle = "#1d2b3a";
+    c.lineWidth = 1;
+    c.stroke();
+
+    // screen glow
+    c.fillStyle = hexA(d.color, 0.10);
+    c.fillRect(mx + 2, my + 2, mw - 4, mh - 4);
+
+    // tiny chart on screen
+    const pad = 3;
+    const sx = mx + pad, sy = my + pad, sw = mw - pad * 2, sh2 = mh - pad * 2;
+    c.save();
+    c.beginPath(); c.rect(sx, sy, sw, sh2); c.clip();
+    c.strokeStyle = "rgba(120,160,200,0.16)";
+    c.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+      c.beginPath(); c.moveTo(sx, sy + (sh2 / 4) * i); c.lineTo(sx + sw, sy + (sh2 / 4) * i); c.stroke();
+    }
+    // candlesticks (decorative, deterministic per agent)
+    const bars = 14;
+    for (let i = 0; i < bars; i++) {
+      const n = Math.sin(d.seed + i * 1.7) * 0.5 + Math.sin(i * 0.6 + d.seed * 0.3) * 0.5;
+      const cx2 = sx + (i + 0.5) * (sw / bars);
+      const cy2 = sy + sh2 * (0.5 - n * 0.32);
+      const up = n > 0;
+      c.strokeStyle = up ? "rgba(52,211,153,0.75)" : "rgba(251,113,133,0.75)";
+      c.fillStyle = c.strokeStyle;
+      c.lineWidth = 1;
+      c.beginPath(); c.moveTo(cx2, cy2 - sh2 * 0.12); c.lineTo(cx2, cy2 + sh2 * 0.12); c.stroke();
+      c.fillRect(cx2 - sw / bars * 0.22, cy2 - sh2 * 0.07, sw / bars * 0.44, sh2 * 0.14);
+    }
+    // scanner line
+    const scan = (t / 2600 + d.seed * 0.01) % 1;
+    c.fillStyle = hexA(d.color, 0.18);
+    c.fillRect(sx, sy + scan * sh2, sw, 1.5);
+    c.restore();
+
+    // keyboard
+    const kw = w * 0.34;
+    const kh = w * 0.075;
+    c.fillStyle = "#0d1620";
+    roundRect(c, x + w * 0.02, y - kh * 0.55, kw, kh, 2);
+    c.fill();
+    c.strokeStyle = "#1b2836";
+    c.stroke();
+    c.fillStyle = "rgba(150,185,220,0.16)";
+    for (let r = 0; r < 2; r++) {
+      for (let i = 0; i < 8; i++) {
+        c.fillRect(x + w * 0.03 + i * kw * 0.115, y - kh * 0.45 + r * kh * 0.32, kw * 0.07, kh * 0.16);
+      }
+    }
+
+    // mug
+    c.fillStyle = "#16222f";
+    roundRect(c, x + w * 0.36, y - w * 0.075, w * 0.055, w * 0.075, 2);
+    c.fill();
+    c.strokeStyle = hexA(d.color, 0.45);
+    c.stroke();
+
+    // papers
+    c.fillStyle = "rgba(190,210,230,0.10)";
+    c.save();
+    c.translate(x - w * 0.05, y - w * 0.012);
+    c.rotate(-0.08);
+    c.fillRect(0, 0, w * 0.12, w * 0.035);
+    c.restore();
+
+    // monitor glow spill on the desk
+    const spill = c.createRadialGradient(mx + mw / 2, y, 2, mx + mw / 2, y, mw * 0.9);
+    spill.addColorStop(0, hexA(d.color, 0.14));
+    spill.addColorStop(1, hexA(d.color, 0));
+    c.fillStyle = spill;
+    c.beginPath();
+    c.ellipse(mx + mw / 2, y + topH, mw * 0.9, topH * 1.6, 0, 0, Math.PI * 2);
+    c.fill();
+
+    // selection ring on the floor
+    if (state.selected === d.name || hover === d.name) {
+      c.strokeStyle = hexA(d.color, state.selected === d.name ? 0.85 : 0.35);
+      c.lineWidth = state.selected === d.name ? 2 : 1;
+      c.beginPath();
+      c.ellipse(x, y + panelH * 0.95, w * 0.56, w * 0.10, 0, 0, Math.PI * 2);
+      c.stroke();
+    }
+  }
+
+  function draw() {
+    if (!W || !H) return;
+    syncCanvasHeight();
+    layoutFloor();
+
+    parX = lerp(parX, (pointer.x - 0.5) * 14, 0.06);
+    parY = lerp(parY, (pointer.y - 0.5) * 9, 0.06);
+
+    if (!bgCache) bgCache = buildBackground();
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#04070b";
+    ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(bgCache, -PAD + parX, -PAD + parY, W + PAD * 2, H + PAD * 2);
+
+    if (!desks.length) {
+      ctx.fillStyle = "#43536a";
+      ctx.font = "12px ui-monospace, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("no active agents", W / 2, H * 0.55);
+      return;
+    }
+
+    const t = performance.now();
+    const ordered = [...desks].sort((a, b) => a.y - b.y || a.x - b.x);
+    for (const d of ordered) {
+      const st = agentState(d.name);
+      const o = depthOffset(d);
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      drawRobot(ctx, d, t, st);
+      drawDesk(ctx, d, t, st);
+      ctx.restore();
+    }
+  }
+
+  function depthOffset(d) {
+    const k = 0.35 + (d.row || 0) * 0.28;
+    return { x: parX * k, y: parY * k * 0.55 };
+  }
+
+  // animation loop
+  let rafId = null;
+  function tick() {
+    draw();
+    rafId = requestAnimationFrame(tick);
+  }
+
+  // ------------------------------------------------------------- interaction
+  function canvasPoint(evt) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+  }
+
+  function deskAt(pt) {
+    for (const d of [...desks].reverse()) {
+      const o = depthOffset(d);
+      const px = pt.x - o.x;
+      const py = pt.y - o.y;
+      const s = d.w * 0.44;
+      const top = d.y - s * 2.1;
+      const bottom = d.y + d.w * 0.22;
+      if (px >= d.x - d.w / 2 - 10 && px <= d.x + d.w / 2 + 10 && py >= top && py <= bottom) return d;
+    }
+    return null;
+  }
+
+  canvas.addEventListener("click", (e) => {
+    const d = deskAt(canvasPoint(e));
+    if (d) selectAgent(d.name);
+  });
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    pointer = {
+      x: clamp((e.clientX - rect.left) / Math.max(1, rect.width), 0, 1),
+      y: clamp((e.clientY - rect.top) / Math.max(1, rect.height), 0, 1),
+    };
+    const d = deskAt(canvasPoint(e));
+    const next = d ? d.name : null;
+    if (next !== hover) {
+      hover = next;
+      canvas.style.cursor = next ? "pointer" : "default";
+    }
+  });
+  canvas.addEventListener("mouseleave", () => {
+    hover = null;
+    pointer = { x: 0.5, y: 0.5 };
+  });
+
+  // ---------------------------------------------------------------- websocket
+  let ws = null;
+  let backoff = 1000;
+
+  function connectWS() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const url = `${proto}://${location.host}/ws/office?token=${encodeURIComponent(state.token)}`;
+    try { ws = new WebSocket(url); } catch { scheduleReconnect(); return; }
+
+    ws.onopen = () => {
+      state.connected = true;
+      backoff = 1000;
+      $("ws-dot").className = "dot ok";
+      $("ws-label").textContent = "LIVE";
+    };
+
+    ws.onmessage = (message) => {
+      let msg;
+      try { msg = JSON.parse(message.data); } catch { return; }
+
+      if (msg.type === "SYNC") {
+        state.events = msg.data || [];
+        if (msg.tasks) state.tasks = msg.tasks;
+        if (msg.status) state.status = msg.status;
+        indexEvents();
+        renderAll();
+        refreshAgents();
+        refreshLessons();
+      } else if (msg.type === "EVENT") {
+        handleEvent(msg.data);
+      } else if (msg.type === "SYSTEM") {
+        toast(msg.content || "system message");
+      }
+    };
+
+    ws.onclose = (evt) => {
+      state.connected = false;
+      $("ws-dot").className = "dot bad";
+      $("ws-label").textContent = evt.code === 4401 ? "AUTH" : "OFFLINE";
+      if (evt.code === 4401) showTokenOverlay();
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => { /* onclose handles it */ };
+  }
+
+  function scheduleReconnect() {
+    const delay = backoff;
+    backoff = Math.min(backoff * 1.7, 15000);
+    setTimeout(connectWS, delay);
+  }
+
+  function indexEvents() {
+    state.lastEventByAgent = {};
+    for (const evt of state.events) {
+      if (evt.agent_id) {
+        evt._at = Date.parse(evt.ts) || Date.now();
+        state.lastEventByAgent[evt.agent_id] = evt;
+      }
+    }
+  }
+
+  function handleEvent(evt) {
+    if (!evt) return;
+    evt._at = Date.now();
+    state.events.push(evt);
+    if (state.events.length > 400) state.events = state.events.slice(-300);
+    if (evt.agent_id) {
+      state.lastEventByAgent[evt.agent_id] = evt;
+      if (evt.type === "LEARNED") {
+        state.pulses.push({ agent: evt.agent_id, kind: "LEARNED", at: Date.now() });
+      }
+    }
+
+    if (evt.type === "ACCOUNT_SNAPSHOT") {
+      const p = parsePayload(evt.payload_json);
+      if (state.status) {
+        state.status.balance = p.balance ?? state.status.balance;
+        state.status.equity = p.equity ?? state.status.equity;
+        state.status.profit_loss = p.profit_loss ?? state.status.profit_loss;
+        state.status.positions = p.positions ?? state.status.positions;
+        state.status.account_source = p.source ?? state.status.account_source;
+      }
+      renderHeader();
+      renderPositions();
+    }
+    if (TRADE_TYPES.includes(evt.type)) {
+      clearTimeout(handleEvent._posTimer);
+      handleEvent._posTimer = setTimeout(refreshStatus, 800);
+      clearTimeout(handleEvent._archTimer);
+      handleEvent._archTimer = setTimeout(refreshArchive, 1200);
+    }
+    if (String(evt.type).startsWith("TASK")) {
+      clearTimeout(handleEvent._taskTimer);
+      handleEvent._taskTimer = setTimeout(refreshTasks, 400);
+    }
+    if (evt.type === "LEARNED") {
+      clearTimeout(handleEvent._lessonTimer);
+      handleEvent._lessonTimer = setTimeout(refreshLessons, 600);
+    }
+
+    renderFeed();
+    renderRoster();
+    renderInspector();
+  }
+
+  // ---------------------------------------------------------------- controls
+  $("kill").addEventListener("click", async () => {
+    if (!confirm("ACTIVATE KILL SWITCH?\n\nThis halts the firm and flattens all positions.")) return;
+    try {
+      await fetch("/api/halt", { method: "POST", headers: authHeaders() });
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "KILL_SWITCH" }));
+      toast("KILL SWITCH ACTIVATED");
+    } catch (e) {
+      toast("Kill switch failed: " + e.message);
+    }
+  });
+
+  $("filters").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-f]");
+    if (!btn) return;
+    state.filter = btn.dataset.f;
+    for (const b of $("filters").querySelectorAll("button")) b.classList.toggle("on", b === btn);
+    renderFeed();
+  });
+
+  $("token-save").addEventListener("click", () => {
+    const value = $("token-input").value.trim();
+    if (!value) return;
+    state.token = value;
+    sessionStorage.setItem("firm_token", value);
+    $("token-overlay").classList.remove("show");
+    if (ws) { try { ws.close(); } catch {} }
+    loadAll();
+    connectWS();
+  });
+  $("token-input").addEventListener("keydown", (e) => { if (e.key === "Enter") $("token-save").click(); });
+
+  $("archive-refresh").addEventListener("click", refreshArchive);
+
+  // ---------------------------------------------------------------- boot
+  const params = new URLSearchParams(location.search);
+  state.token = params.get("token") || sessionStorage.getItem("firm_token") || "";
+  if (params.get("token")) {  // Token aus der Adresszeile entfernen (Verlauf/Screenshots)
+    sessionStorage.setItem("firm_token", state.token);
+    history.replaceState(null, "", location.pathname);
+  }
+
+  window.addEventListener("resize", () => {
+    layoutKey = "";
+    resizeCanvas();
+  });
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      layoutKey = "";
+      resizeCanvas();
+    }).observe(canvas);
+  }
+
+  resizeCanvas();
+  loadAll().catch(() => {});
+  connectWS();
+  if (rafId === null) tick();
+
+  setInterval(refreshStatus, 10000);
+  setInterval(refreshAgents, 20000);
+  setInterval(refreshArchive, 20000);
+})();
+</script>
+</body>
+</html>
