@@ -160,6 +160,15 @@ FIRM_TRADE_RESOLUTION=HOUR  # MUSS zur Forschung passen
 FIRM_RESEARCH_DAYS=7
 FIRM_DEMO_EXPLORE=1
 FIRM_MCP=1
+FIRM_MAX_API_ERRORS=10         # API-Fehlerlimit ...
+FIRM_API_ERROR_WINDOW_MIN=30   # ... innerhalb dieses Fensters -> keine neuen Orders
+FIRM_REPORT_DIR=reports        # Tagesberichte (UTC), automatisch
+```
+
+Limitbruch (Tagesverlust/Drawdown auf Equity): Halt-Flag + Kill-Switch (Flatten). Wiederanlauf nur von Hand:
+
+```bash
+python -m src.firm resume   # erst nach Pruefung der Ursache
 ```
 
 Sicherheit: Im PAPER-Modus verweigert der Desk den Handel, wenn der Broker kein

@@ -59,6 +59,10 @@ class StrategyGate:
             return (False, None, None, 0.0,
                     f"Urteil gilt fuer {d['resolution']}-Kerzen, Desk laeuft auf {resolution} (FIRM_TRADE_RESOLUTION pruefen)")
         verdict = v.get("verdict")
+        if v.get("size_feasible") is False and not v.get("explore"):
+            return False, None, None, 0.0, v.get("size_reason") or "mit diesem Konto nicht handelbar (Mindestgroesse)"
+        if v.get("size_feasible") is False:
+            verdict = "SIZE_BLOCKED"
         if verdict == "PASS":
             return True, v["strategy"], v.get("params"), 1.0, "PASS (out-of-sample bestanden)"
         if verdict == "FORWARD_TEST" and demo_only_ok:

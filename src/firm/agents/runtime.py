@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from src.firm.agents.actions import extract_json, testable_lesson, validate_action
 from src.firm.agents.facts import check_claims
 from src.firm.agents.memory import LessonStore
+from src.firm.agents.metrics import agent_metrics, tokens_today
 from src.firm.bus.event_store import EventStore
 from src.firm.llm.base import LLMProvider
 from src.firm.llm.factory import create_llm_provider, get_llm_provider
@@ -36,6 +37,7 @@ Action shapes:
   {"type": "block_entries", "epic": "EURUSD", "hours": 6, "reason": "...", "source": "tool result / dated event"}
   {"type": "request_research", "reason": "..."}
   {"type": "flag", "severity": "info|warn|critical", "reason": "..."}
+  {"type": "propose_hire", "role": "DataEngineer", "reason": "backlog / metric that shows the bottleneck"}   // operator must approve
 Only propose an action when FACTS or tool results justify it. "actions": [] is a normal, good answer.
 Any claim that contradicts FACTS invalidates your whole answer."""
 
@@ -107,6 +109,7 @@ class AgentRuntime:
         archive: Any = None,
         tools: Any = None,
         whitelist: Optional[List[str]] = None,
+        firm_token_budget: Optional[int] = None,
     ):
         self.event_store = event_store
         self.llm = llm if llm is not None else get_llm_provider()
@@ -114,12 +117,14 @@ class AgentRuntime:
         self.archive = archive
         self.tools = tools
         self.whitelist = list(whitelist or [])
+        self.firm_token_budget = firm_token_budget
         self.reflect_enabled = (
             reflect if reflect is not None
             else os.getenv("FIRM_REFLECT", "1").strip().lower() not in ("0", "false", "no", "off")
         )
         self.active_agents: Dict[str, AgentConfig] = {}
         self._providers: Dict[str, LLMProvider] = {}
+        self._tokens = 0
 
     # ------------------------------------------------------------------ roles
     def load_agent(self, config_path: str):
@@ -225,18 +230,40 @@ class AgentRuntime:
         archive = self._archive_context(config.name)
         if archive:
             parts.append(archive)
+        record = self._track_record(config.name)
+        if record:
+            parts.append(record)
         if tools:
             parts.append("READ-ONLY TOOLS (Capital.com demo via MCP):\n" + self.tools.describe(tools))
         parts.append(OUTPUT_CONTRACT % (MAX_TOOL_CALLS, ", ".join(config.actions) or "none"))
         return "\n\n".join(parts)
 
     # ------------------------------------------------------------------- loop
+    def _track_record(self, agent_name: str) -> str:
+        """The agent's own measured quality (last 7 days) - feedback it can act on."""
+        try:
+            m = agent_metrics(self.event_store, days=7, agent=agent_name).get(agent_name)
+        except Exception:
+            return ""
+        if not m or not m["tasks"]:
+            return ""
+        reasons = [json.loads(e["payload_json"]).get("reason", "") for e in
+                   self.event_store.get_events(types=["AGENT_INVALID"], last=50) if e.get("agent_id") == agent_name][-3:]
+        text = (f"YOUR TRACK RECORD (7 days, measured): {m['tasks']} tasks, valid rate "
+                f"{m['valid_rate'] if m['valid_rate'] is not None else 'n/a'}, {m['invalid']} rejected answers, "
+                f"{m['rejected_actions']} rejected actions.")
+        if reasons:
+            text += " Last rejection reasons: " + " | ".join(r[:160] for r in reasons)
+        return text
+
     async def _call_llm(self, provider: LLMProvider, system_prompt: str, messages: List[Dict[str, str]]) -> str:
         kwargs: Dict[str, Any] = {"max_tokens": 4000}
         if "json_mode" in inspect.signature(provider.generate).parameters:
             kwargs["json_mode"] = True
         response = await provider.generate(system_prompt=system_prompt, messages=messages, **kwargs)
         text = (response.content or "").strip()
+        usage = response.usage or {}
+        self._tokens += int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
         if not text:
             raise ValueError("LLM returned an empty response.")
         return text
@@ -256,7 +283,17 @@ class AgentRuntime:
 
         provider = self._provider_for(config)
         source = getattr(provider, "provider_name", "unknown")
-        lessons = self.memory.recent(agent_name, limit=MAX_LESSONS_IN_PROMPT)
+        # Token budgets (role: daily_token_budget, firm: limits.toml operational.max_token_budget_daily).
+        used_agent = tokens_today(self.event_store, agent_name)
+        used_firm = tokens_today(self.event_store) if self.firm_token_budget else 0
+        if used_agent >= config.daily_token_budget or (self.firm_token_budget and used_firm >= self.firm_token_budget):
+            result = {"status": "budget_exhausted", "deliverable": f"Token budget used up today "
+                      f"(agent {used_agent}/{config.daily_token_budget}, firm {used_firm}/{self.firm_token_budget})",
+                      "provider": source, "lessons_applied": 0, "actions": [], "lessons_learned": [], "tokens": 0}
+            self.event_store.append(agent_name, "RESULT", result, correlation_id=task_id)
+            return result
+        self._tokens = 0
+        lessons = self.memory.relevant(agent_name, observation, limit=MAX_LESSONS_IN_PROMPT)
         system_prompt = self._compose_system_prompt(config, lessons)
         messages = [{"role": "user", "content": self._user_prompt(config, observation, task_id, facts)}]
         allowed_tools = self._tool_names(config)
@@ -298,7 +335,7 @@ class AgentRuntime:
                                                             "lessons_applied": len(lessons)}, correlation_id=task_id)
             result = {"status": "llm_unavailable", "deliverable": thought, "provider": source,
                       "model": getattr(provider, "model", None), "lessons_applied": len(lessons),
-                      "lessons_learned": [], "actions": []}
+                      "lessons_learned": [], "actions": [], "tokens": self._tokens}
             self.event_store.append(agent_name, "RESULT", result, correlation_id=task_id)
             return result
 
@@ -321,6 +358,7 @@ class AgentRuntime:
             "model": getattr(provider, "model", None),
             "lessons_applied": len(lessons),
             "tool_calls": tool_calls,
+            "tokens": self._tokens,
             "actions": [],
             "lessons_learned": [],
         }

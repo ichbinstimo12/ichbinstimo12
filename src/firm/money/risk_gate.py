@@ -82,12 +82,16 @@ class RiskGate:
 
         return True, "Approved"
 
-    def check_account_health(self, current_balance: float, peak_balance: float, daily_pnl: float) -> (bool, str):
+    def check_account_health(self, current_balance: float, peak_balance: float, daily_pnl: float,
+                             day_start: Optional[float] = None) -> Tuple[bool, str]:
         """
-        Checks for Daily Loss and Drawdown limits.
+        Checks for Daily Loss and Drawdown limits. Pass equity (incl. open P&L) as `current_balance`.
+        The daily loss is measured against the day's starting value when known.
         """
-        # Daily Loss Limit (2%)
-        if daily_pnl <= -(current_balance * self.limits["account"]["daily_loss_limit"]):
+        if not peak_balance or peak_balance <= 0:
+            return False, "Peak balance unknown - not trading"
+        base = day_start if day_start and day_start > 0 else current_balance
+        if daily_pnl <= -(base * self.limits["account"]["daily_loss_limit"]):
             return False, "Daily loss limit exceeded"
 
         # Max Drawdown Limit (8%)

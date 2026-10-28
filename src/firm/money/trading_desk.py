@@ -16,8 +16,9 @@ import json
 import logging
 import math
 import os
+import time
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -240,7 +241,9 @@ class DeskState:
 
     def _save(self) -> None:
         try:
-            self.path.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+            tmp.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+            tmp.replace(self.path)  # atomic: a crash never leaves a half-written state file
         except Exception as e:
             logger.warning(f"Could not persist desk state: {e}")
 
@@ -291,6 +294,9 @@ class TradingDesk:
         rules: Optional[DeskRules] = None,
         overlay: Any = None,
         health: Optional[StrategyHealth] = None,
+        halt_file: Optional[str] = None,
+        max_api_errors: int = 10,
+        api_error_window_s: float = 1800.0,
     ):
         self.broker = broker
         self.gateway = gateway
@@ -316,6 +322,10 @@ class TradingDesk:
         self.health = health or StrategyHealth()
         self.last_summary: Dict[str, Any] = {}
         self._last_status_key: Optional[str] = None
+        self.halt_file = Path(halt_file) if halt_file else None
+        self.max_api_errors, self.api_error_window_s = max_api_errors, api_error_window_s
+        self._api_errors: List[float] = []
+        self._api_halt_reported = False
 
         import tomllib
         with open(whitelist_path, "rb") as f:
@@ -407,6 +417,63 @@ class TradingDesk:
             return None
         return "Kill-Kriterium aktiv: " + "; ".join(s.get("reasons") or [])
 
+    def _stale(self, candles: List[Dict[str, Any]]) -> Optional[str]:
+        """Stale-data check: the newest candle must be at most 3 bars old (prices frozen -> do not trade)."""
+        if not candles:
+            return "keine Kursdaten"
+        from src.firm.research.lab import parse_ts
+        last = parse_ts(candles[-1].get("t") or candles[-1].get("ts"))
+        if last is None:
+            return None  # format unknown (e.g. test doubles) -> the signal engine decides
+        age = time.time() - last
+        bar = RES_SECONDS.get(self.resolution, 3600)
+        if age > 3 * bar + bar:
+            return f"Kursdaten veraltet (letzte Kerze vor {age / 60:.0f} min)"
+        return None
+
+    def _api_error(self) -> None:
+        self._api_errors.append(datetime.utcnow().timestamp())
+
+    def _api_error_block(self) -> Optional[str]:
+        """N API errors within M minutes -> no new orders until the window is clean again (spec: API error limit)."""
+        now = datetime.utcnow().timestamp()
+        self._api_errors = [t for t in self._api_errors if now - t < self.api_error_window_s]
+        if len(self._api_errors) >= self.max_api_errors:
+            reason = (f"API-Fehlerlimit: {len(self._api_errors)} Fehler in "
+                      f"{self.api_error_window_s / 60:.0f} min - keine neuen Orders")
+            if not self._api_halt_reported:
+                self._api_halt_reported = True
+                self.event_store.append("TRADING_DESK", "TRADING_HALTED", {"reason": reason, "action": "entries paused"})
+            return reason
+        self._api_halt_reported = False
+        return None
+
+    def _open_risk(self) -> float:
+        """Sum of the money at risk (stop distance x size, account currency) of all positions the desk opened."""
+        return sum(float(m.get("risk") or 0.0) for m in (self.state.data.get("pos_meta") or {}).values())
+
+    async def _recover_fill(self, epic: str, side: str, size: float, known_deals: set,
+                            proposal_reason: str) -> Optional[Dict[str, Any]]:
+        """
+        The order request failed (timeout, confirm error) - but did it land? Ask the broker. If a new position
+        exists, book it like a fill; otherwise the reconciler would see 'unauthorised exposure' and kill the firm.
+        """
+        try:
+            positions = await self.broker.get_positions()
+        except Exception:
+            return None
+        for p in positions:
+            if (str(p.get("epic") or "").upper() == epic.upper() and str(p.get("direction") or "").upper() == side
+                    and str(p.get("dealId") or "") not in known_deals):
+                filled = {"status": "FILLED", "order_id": p.get("dealId"), "filled_price": p.get("level"),
+                          "filled_size": p.get("volume") or size}
+                self.event_store.append("EXECUTION_GATEWAY", "ORDER_FILLED", {
+                    "order_id": p.get("dealId"), "epic": epic, "side": side, "size": filled["filled_size"],
+                    "price": p.get("level"), "recovered": True, "reason": proposal_reason})
+                logger.warning(f"Order for {epic} errored but the position exists at the broker - booked as fill.")
+                return filled
+        return None
+
     def _publish_status(self, summary: Dict[str, Any]) -> None:
         """DESK_STATUS nur bei Aenderung der Gruende: Agenten und Dashboard sehen, WARUM nicht gehandelt wird."""
         reasons = {s.get("epic"): s.get("reason") for s in summary.get("skipped", [])}
@@ -462,26 +529,41 @@ class TradingDesk:
             logger.warning(f"Trading desk idle: {blocked}")
             return summary
 
+        api_block = self._api_error_block()
+        if api_block:
+            summary["error"] = api_block
+            return summary
+
         try:
             account = await self.broker.get_account_details()
             balance = float(account.get("balance") or 0.0)
             equity = float(account.get("equity") or balance)
         except Exception as e:
+            self._api_error()
             summary["error"] = f"account unavailable: {e}"
             logger.error(summary["error"])
             return summary
 
-        today = date.today().isoformat()
-        day_start = self.state.day_start_balance(today, balance)
-        peak = self.state.peak_balance(max(equity, balance))
-        daily_pnl = balance - day_start
+        # Limits are measured on EQUITY (includes open P&L) and the UTC trading day.
+        today = datetime.now(timezone.utc).date().isoformat()
+        day_start = self.state.day_start_balance(today, equity)
+        peak = self.state.peak_balance(equity)
+        daily_pnl = equity - day_start
 
-        healthy, health_reason = self.risk_gate.check_account_health(balance, peak, daily_pnl)
+        healthy, health_reason = self.risk_gate.check_account_health(equity, peak, daily_pnl, day_start)
         if not healthy:
             self.event_store.append(
                 "TRADING_DESK", "TRADING_HALTED",
-                {"reason": health_reason, "balance": balance, "peak": peak, "daily_pnl": daily_pnl},
+                {"reason": health_reason, "balance": balance, "equity": equity, "peak": peak,
+                 "day_start": day_start, "daily_pnl": daily_pnl, "action": "flatten + halt (restart only by operator)"},
             )
+            # Spec: breach -> flatten everything and stop; only the operator restarts (`firm resume`).
+            if self.halt_file is not None:
+                try:
+                    self.halt_file.parent.mkdir(parents=True, exist_ok=True)
+                    self.halt_file.write_text(f"{datetime.utcnow().isoformat()} {health_reason}", encoding="utf-8")
+                except Exception as e:
+                    logger.critical(f"Could not write halt flag: {e}")
             summary["error"] = health_reason
             logger.critical(f"Trading halted by account health: {health_reason}")
             return summary
@@ -489,6 +571,7 @@ class TradingDesk:
         try:
             positions = await self.broker.get_positions()
         except Exception as e:
+            self._api_error()
             summary["error"] = f"positions unavailable: {e}"
             logger.error(summary["error"])
             return summary
@@ -520,6 +603,7 @@ class TradingDesk:
             try:
                 market = await self.broker.get_market_details(epic)
             except Exception as e:
+                self._api_error()
                 summary["skipped"].append({"epic": epic, "reason": f"market details unavailable: {e}"})
                 continue
 
@@ -545,7 +629,16 @@ class TradingDesk:
                     risk_factor *= o_factor
                     why = f"{why}; Risiko x{o_factor:.2f} ({o_why})"
             engine = self.engine or self._engine_for(strat, params)
-            candles = await self.broker.get_candles(epic, self.resolution, self.lookback)
+            try:
+                candles = await self.broker.get_candles(epic, self.resolution, self.lookback)
+            except Exception as e:
+                self._api_error()
+                summary["skipped"].append({"epic": epic, "reason": f"candles unavailable: {e}"})
+                continue
+            stale = self._stale(candles)
+            if stale:
+                summary["skipped"].append({"epic": epic, "reason": stale})
+                continue
             signal = engine.evaluate(epic, candles, market.get("bid"), market.get("ask"))
             if signal is None:
                 summary["skipped"].append({"epic": epic, "reason": "no signal"})
@@ -564,6 +657,11 @@ class TradingDesk:
                 signal.entry, signal.stop_loss, balance, risk_pct, fx, market, risk_factor=risk_factor,
                 max_leverage=float(self.limits["account"]["max_leverage"]))
             sizing_reason = f"[{strat}, {why}] {sizing_reason}"
+            max_total = float(self.limits["trade"].get("max_total_risk", 0.015))
+            if size > 0 and self._open_risk() + _risk > balance * max_total * 1.001:
+                size = 0.0
+                sizing_reason = (f"Gesamtrisiko offener Positionen {self._open_risk():.2f} + {_risk:.2f} "
+                                 f"> {max_total:.1%} des Kontos (Klumpenrisiko)")
             if size <= 0:
                 self.event_store.append(
                     "TRADING_DESK", "TRADE_REJECTED",
@@ -614,6 +712,10 @@ class TradingDesk:
                 current_price=signal.entry,
                 fx_to_account=fx,
             )
+            if result.get("status") == "ERROR":
+                recovered = await self._recover_fill(epic, signal.side, size, known_deals, signal.reason)
+                if recovered:
+                    result = recovered
 
             if result.get("status") == "FILLED":
                 self.state.mark_trade(epic, datetime.utcnow().timestamp())

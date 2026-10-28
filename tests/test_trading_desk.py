@@ -438,3 +438,73 @@ async def test_desk_refuses_a_broker_without_order_support(desk_env):
     summary = await desk.run_cycle()
 
     assert "order placement" in summary["error"]
+
+
+# ------------------------------------------------------------ safety (audit round 2)
+@pytest.mark.asyncio
+async def test_daily_loss_breach_writes_the_halt_flag(desk_env):
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker)
+    desk.halt_file = desk_env["tmp"] / "firm.halt"
+    await desk.run_cycle()                      # day start = 1000
+    broker.balance = 975.0                      # -2.5 % equity on the same UTC day
+    summary = await desk.run_cycle()
+    assert "Daily loss" in summary["error"]
+    assert desk.halt_file.exists(), "breach must flatten + halt (main loop reacts to the flag)"
+
+
+@pytest.mark.asyncio
+async def test_api_error_limit_pauses_entries(desk_env):
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker)
+    desk.max_api_errors = 3
+
+    async def boom():
+        raise ConnectionError("503")
+    broker.get_account_details = boom
+    for _ in range(3):
+        await desk.run_cycle()
+    broker.get_account_details = FakeBroker([]).get_account_details
+    summary = await desk.run_cycle()
+    assert "API-Fehlerlimit" in summary["error"] and broker.orders == []
+
+
+@pytest.mark.asyncio
+async def test_failed_order_that_landed_is_recovered_not_treated_as_foreign(desk_env):
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+
+    async def place_then_fail(epic, side, size, stop_loss=None, take_profit=None):
+        broker.positions.append({"epic": epic, "direction": side, "dealId": "POS-9", "volume": size, "level": 180.5})
+        raise ConnectionError("confirm timed out")
+    broker.place_order = place_then_fail
+    desk = build_gated_desk(desk_env, broker)
+    summary = await desk.run_cycle()
+    assert summary["trades"] and summary["trades"][0]["order_id"] == "POS-9"
+    fills = [e for e in desk_env["store"].get_events() if e["type"] == "ORDER_FILLED"]
+    assert fills and '"recovered": true' in fills[-1]["payload_json"]
+
+
+@pytest.mark.asyncio
+async def test_total_open_risk_is_capped(desk_env):
+    broker = FakeBroker(hourly_candles(breakout_closes()),
+                        positions=[{"epic": "GOLD", "direction": "BUY", "dealId": "G"},
+                                   {"epic": "EURUSD", "direction": "SELL", "dealId": "E"}])
+    desk = build_gated_desk(desk_env, broker)
+    desk.state.data["pos_meta"] = {"GOLD": {"risk": 5.0}, "EURUSD": {"risk": 5.0}}   # 1.0 % already at risk
+    desk.limits["trade"]["max_total_risk"] = 0.012
+    summary = await desk.run_cycle()
+    assert broker.orders == []
+    assert "Klumpenrisiko" in summary["skipped"][0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_stale_prices_are_not_traded(desk_env):
+    closes = breakout_closes()
+    candles = hourly_candles(closes)
+    from datetime import datetime, timedelta
+    for c in candles:   # shift everything 10 hours into the past
+        c["t"] = (datetime.fromisoformat(c["t"]) - timedelta(hours=10)).strftime("%Y-%m-%dT%H:%M:%S")
+    broker = FakeBroker(candles)
+    desk = build_gated_desk(desk_env, broker)
+    summary = await desk.run_cycle()
+    assert broker.orders == [] and "veraltet" in summary["skipped"][0]["reason"]

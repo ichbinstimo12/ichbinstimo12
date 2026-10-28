@@ -381,6 +381,7 @@
     tasks: [],
     lessons: [],
     archive: null,
+    hiring: [],
     events: [],
     filter: "all",
     connected: false,
@@ -473,10 +474,11 @@
 
   // ---------------------------------------------------------------- data
   async function loadAll() {
-    const [status, agents, tasks, lessons, archive] = await Promise.allSettled([
+    const [status, agents, tasks, lessons, archive, hiring] = await Promise.allSettled([
       api("/api/status"), api("/api/agents"), api("/api/tasks"), api("/api/lessons"),
-      api("/api/archive?limit=200"),
+      api("/api/archive?limit=200"), api("/api/hiring"),
     ]);
+    if (hiring.status === "fulfilled") state.hiring = hiring.value.requests || [];
     if (status.status === "fulfilled") state.status = status.value;
     if (agents.status === "fulfilled") state.agents = agents.value.agents || [];
     if (tasks.status === "fulfilled") state.tasks = tasks.value.tasks || [];
@@ -524,6 +526,7 @@
   async function refreshStatus() {
     try {
       state.status = await api("/api/status");
+      try { state.hiring = (await api("/api/hiring")).requests; } catch (e) { /* hiring list optional */ }
       renderHeader();
       renderPositions();
       renderLessonCount();
@@ -757,11 +760,28 @@
       html += `<div class="pos"><span class="epic">${esc(e)}</span><span class="side ${lane === "PASS" ? "buy" : "sell"}">${esc(lane)}</span>
         <span class="nums">${strat}${explore}${n}<br>${esc(reasons[e] || "")}</span></div>`;
     }
+    for (const h of (state.hiring || []).filter((x) => x.status === "PENDING")) {
+      html += `<div class="pos"><span class="epic">HIRE</span><span class="side buy">ASK</span>
+        <span class="nums"><b>${esc(h.role)}</b> · ${esc(h.justification)} · ${esc(h.token_budget)} tokens/day<br>
+        <button class="mini" data-hire="${esc(h.request_id)}" data-decision="APPROVED">APPROVE</button>
+        <button class="mini" data-hire="${esc(h.request_id)}" data-decision="REJECTED">REJECT</button></span></div>`;
+    }
     for (const o of overlays) {
       html += `<div class="pos"><span class="epic">${esc(o.epic)}</span><span class="side sell">x${Number(o.factor).toFixed(2)}</span>
         <span class="nums">${esc(o.agent_id)}: ${esc(o.reason)}</span></div>`;
     }
     box.innerHTML = html;
+    box.querySelectorAll("button[data-hire]").forEach((b) => b.addEventListener("click", async () => {
+      if (!confirm(`${b.dataset.decision} hiring request?`)) return;
+      try {
+        const res = await fetch(`/api/hire/${encodeURIComponent(b.dataset.hire)}`, {
+          method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({ decision: b.dataset.decision }) });
+        toast(res.ok ? `Hiring ${b.dataset.decision.toLowerCase()}` : `Hiring failed (${res.status})`);
+        state.hiring = (await api("/api/hiring")).requests;
+        renderGate();
+      } catch (e) { toast(String(e)); }
+    }));
   }
 
   function renderLessons() {
@@ -874,7 +894,12 @@
       <span>role <b>${esc(a.role || "—")}</b></span>
       <span>model <b>${esc(a.model || "default")}</b></span>
       <span>reports to <b>${esc(a.reporting_line || "—")}</b></span>
-      <span>lessons <b>${esc(a.lessons_learned ?? 0)}</b></span>`;
+      <span>lessons <b>${esc(a.lessons_learned ?? 0)}</b></span>
+      ${a.metrics_7d ? `<span>7d tasks <b>${esc(a.metrics_7d.tasks)}</b></span>
+      <span>valid <b>${a.metrics_7d.valid_rate == null ? "—" : Math.round(a.metrics_7d.valid_rate * 100) + "%"}</b></span>
+      <span>rejected <b>${esc(a.metrics_7d.invalid)}</b></span>
+      <span>actions <b>${esc(a.metrics_7d.actions)}</b></span>
+      <span>tokens <b>${esc(a.metrics_7d.tokens)}</b></span>` : ""}`;
     $("i-act").textContent = last
       ? `${last.type}: ${eventText(last)}`
       : "No activity recorded yet in this session.";

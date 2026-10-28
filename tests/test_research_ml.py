@@ -93,3 +93,32 @@ def test_gate_live_mode_never_trades_forward_test_or_explore(tmp_path, monkeypat
         assert not gate.decision(epic, True, "LIVE_MICRO")[0], "LIVE never trades unproven strategies"
         assert not gate.decision(epic, False, "PAPER")[0], "non-demo broker never trades unproven strategies"
     assert gate.decision("C", False, "LIVE")[0]
+
+
+def test_minimum_size_feasibility_blocks_untradeable_markets():
+    rep = {"extra": {"median_stop_pct": 0.03}}
+    # BTC-like: price 100k, min 0.01, 3 % stop -> 30 USD at risk vs 5 CHF budget
+    why = pipeline.size_feasibility(rep, {"price": 100_000, "min_size": 0.01, "fx": 0.8},
+                                    {"balance": 1000, "risk_pct": 0.005}, "PASS")
+    assert why and "nicht handelbar" in why
+    assert pipeline.size_feasibility(rep, {"price": 1.1, "min_size": 100, "fx": 0.8},
+                                     {"balance": 1000, "risk_pct": 0.005}, "PASS") is None
+    assert pipeline.size_feasibility(rep, None, None, "PASS") is None
+
+
+def test_report_contains_verdict_table_and_regimes(tmp_path):
+    data = {"TREND": make(4500, seed=201, regime=True, mu=0.0012, vol=0.002)}
+    _, lines, _ = pipeline.run_research(data, "HOUR", log=lambda *_: None)
+    text = "\n".join(lines)
+    assert "| Strategy | Markt | Timeframe | Sharpe" in text
+    assert "Regime:" in text and "high_vol" in text
+
+
+def test_gate_blocks_size_infeasible_verdicts(tmp_path):
+    import time
+    path = tmp_path / "v.json"
+    path.write_text(json.dumps({"created": time.time(), "verdicts": {
+        "BTCUSD": {"verdict": "PASS", "strategy": "donchian_trend", "params": {}, "size_feasible": False,
+                   "size_reason": "Mindestgroesse zu gross"}}}))
+    ok, *_, why = StrategyGate(str(path)).decision("BTCUSD", True, "PAPER")
+    assert not ok and "Mindestgroesse" in why

@@ -7,6 +7,7 @@ Aktion, die Risiko erhoeht, eine Order sendet, Limits aendert oder eine Strategi
   block_entries    Neue Einstiege befristet sperren (z. B. vor einem Termin). Braucht eine Quelle.
   request_research Forschungslauf anstossen (der Orchestrator begrenzt die Haeufigkeit)
   flag             Hinweis/Alarm an CEO und Dashboard
+  propose_hire     (nur CEO) Einstellungsantrag fuer eine vorhandene Rollen-Vorlage; wirksam erst nach Freigabe durch dich
 """
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-ACTION_TYPES = ("tighten_risk", "block_entries", "request_research", "flag")
+ACTION_TYPES = ("tighten_risk", "block_entries", "request_research", "flag", "propose_hire")
 EPIC_RE = re.compile(r"^[A-Z0-9_.]{2,20}$|^\*$")
 
 
@@ -97,6 +98,12 @@ def validate_action(action: Any, allowed: List[str], whitelist: List[str]) -> Tu
 
     if kind == "request_research":
         return True, {"type": kind, "reason": reason}
+
+    if kind == "propose_hire":
+        role = str(action.get("role") or "").strip()
+        if not re.match(r"^[A-Za-z]{3,40}$", role):
+            return False, "propose_hire: 'role' muss der Name einer Rollen-Vorlage sein"
+        return True, {"type": kind, "role": role, "reason": reason}
 
     severity = str(action.get("severity") or "info").lower()
     if severity not in ("info", "warn", "critical"):

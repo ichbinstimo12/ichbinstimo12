@@ -32,9 +32,12 @@ class KillSwitch:
                 # This is a pseudo-call; we'll implement flatten_all in BrokerClient
                 if hasattr(self.broker, 'flatten_all'):
                     await self.broker.flatten_all()
+                elif hasattr(self.broker, 'close_position'):
+                    for pos in await self.broker.get_positions():
+                        if pos.get("dealId"):
+                            await self.broker.close_position(str(pos["dealId"]))
                 else:
-                    logger.warning("BrokerClient.flatten_all not yet implemented. Simulating close...")
-                    await asyncio.sleep(1)
+                    raise RuntimeError("broker can neither flatten nor close positions")
 
                 # 2. Verify with the broker: open positions must really be gone.
                 positions = await self.broker.get_positions()

@@ -210,6 +210,8 @@ def create_app(
     async def get_agents():
         agents = []
         memory = getattr(getattr(orchestrator, "agent_runtime", None), "memory", None)
+        from src.firm.agents.metrics import agent_metrics
+        metrics = agent_metrics(store, days=7)
         for c in getattr(getattr(orchestrator, "agent_runtime", None), "active_agents", {}).values():
             if c is None:
                 continue
@@ -220,6 +222,9 @@ def create_app(
                 "reporting_line": c.reporting_line,
                 "daily_token_budget": c.daily_token_budget,
                 "lessons_learned": memory.count(c.name) if memory is not None else 0,
+                "metrics_7d": metrics.get(c.name),
+                "actions": list(getattr(c, "actions", []) or []),
+                "triggers": list(getattr(c, "triggers", []) or []),
             })
         return {"agents": agents}
 

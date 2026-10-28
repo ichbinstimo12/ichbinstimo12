@@ -138,17 +138,29 @@ class LessonStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def relevant(self, agent_id: str, text: str, limit: int = 6) -> List[Dict[str, Any]]:
+        """Lessons most related to the task text (keyword overlap), ties broken by confidence and recency."""
+        candidates = self.recent(agent_id, limit=self.max_per_agent)
+        words = {w for w in _normalize(text or "").replace(",", " ").replace(".", " ").split() if len(w) > 3}
+
+        def score(lesson: Dict[str, Any]) -> float:
+            lw = set(lesson["normalized"].replace(",", " ").replace(".", " ").split())
+            return len(words & lw) + float(lesson["confidence"])
+
+        return sorted(candidates, key=score, reverse=True)[:max(1, limit)]
+
     def record_applied(self, lesson_ids: List[str]) -> None:
         ids = [i for i in (lesson_ids or []) if i]
         if not ids:
             return
         placeholders = ",".join("?" for _ in ids)
         now = datetime.utcnow()
+        # Being shown in a prompt is not a confirmation: only re-learning the same lesson (add) extends its life.
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                f"UPDATE lessons SET applied_count = applied_count + 1, last_applied_at = ?, "
-                f"expires_at = ? WHERE lesson_id IN ({placeholders})",
-                (now.isoformat(), (now + timedelta(days=self.ttl_days)).isoformat(), *ids),
+                f"UPDATE lessons SET applied_count = applied_count + 1, last_applied_at = ? "
+                f"WHERE lesson_id IN ({placeholders})",
+                (now.isoformat(), *ids),
             )
             conn.commit()
 

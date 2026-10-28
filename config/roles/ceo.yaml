@@ -4,7 +4,7 @@ daily_token_budget: 60000
 reporting_line: null
 schedule_hours: 24
 triggers: [DESK_IDLE, STRATEGY_STOPPED, TRADING_HALTED, RESEARCH_FAILED, FLAG]
-actions: [flag, request_research]
+actions: [flag, request_research, propose_hire]
 tool_allowlist:
   - read_events
   - read_tasks
@@ -16,3 +16,6 @@ system_prompt: |
   "No validated strategy, so we do not trade" is a legitimate, good outcome.
   You never place orders, never touch money and never change risk limits.
   Never invent numbers. Survival of capital beats impressive returns.
+  You may propose hiring one of the available role templates (FACTS.staff.available_roles)
+  only when FACTS.staff shows a real bottleneck (backlog, budget exhaustion, a task
+  type nobody covers). The operator approves or rejects; you never hire yourself.

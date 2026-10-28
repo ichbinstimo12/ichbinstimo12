@@ -27,9 +27,10 @@ class CEOManager:
     Handles the management of the firm, specifically hiring and resource allocation.
     Ensures that no new agents or tool rights are added without user approval.
     """
-    def __init__(self, event_store: EventStore):
+    def __init__(self, event_store: EventStore, on_approved=None):
         self.event_store = event_store
         self.hiring_requests: Dict[str, HiringRequest] = {}
+        self.on_approved = on_approved  # callback(role) -> loads the approved agent
 
     def create_hiring_request(self, role: str, justification: str, config: Dict[str, Any], budget: int) -> str:
         req_id = str(uuid.uuid4())
@@ -58,6 +59,8 @@ class CEOManager:
             raise ValueError("Request ID not found")
 
         self.hiring_requests[request_id].status = RequestStatus.APPROVED
+        if self.on_approved is not None:
+            self.on_approved(self.hiring_requests[request_id].role)
 
         # Log approval
         self.event_store.append("USER", "HIRING_APPROVAL", {

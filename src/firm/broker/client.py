@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -19,6 +20,9 @@ API_PREFIX = "/api/v1"
 
 # Capital.com sessions expire after 10 minutes of inactivity. Refresh earlier.
 SESSION_TTL_SECONDS = 540
+# Client-side rate limits (ANNAHME nach open-api.capital.com: max. 10 Anfragen/s, Session-Anfragen max. 1/s).
+MIN_REQUEST_INTERVAL = 0.11
+MIN_SESSION_INTERVAL = 1.1
 
 
 @dataclass
@@ -68,6 +72,21 @@ class CapitalComClient:
 
         self.session: Optional[BrokerSession] = None
         self._client = client or httpx.AsyncClient(timeout=20.0)
+        self._throttle_lock = asyncio.Lock()
+        self._last_request = 0.0
+        self._last_session = 0.0
+
+    async def _throttle(self, session: bool = False) -> None:
+        """Space requests out so the firm never runs into the broker's rate limit."""
+        async with self._throttle_lock:
+            now = time.monotonic()
+            wait = max(self._last_request + MIN_REQUEST_INTERVAL - now,
+                       (self._last_session + MIN_SESSION_INTERVAL - now) if session else 0.0)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request = time.monotonic()
+            if session:
+                self._last_session = self._last_request
 
     @staticmethod
     def _normalize_base_url(url: str) -> str:
@@ -104,6 +123,7 @@ class CapitalComClient:
         headers = {"X-CAP-API-KEY": self.api_key, "Content-Type": "application/json"}
         payload = {"identifier": self.identifier, "password": self.password}
 
+        await self._throttle(session=True)
         try:
             response = await self._client.post(url, headers=headers, json=payload)
             response.raise_for_status()
@@ -147,10 +167,12 @@ class CapitalComClient:
         """Authenticated request with one transparent re-auth on 401."""
         await self._ensure_session()
         url = f"{self.base_url}{API_PREFIX}{path}"
+        await self._throttle()
         response = await self._client.request(method, url, headers=self._get_headers(), **kwargs)
         if response.status_code == 401:
             logger.warning("Session expired (401). Re-authenticating once...")
             await self.authenticate()
+            await self._throttle()
             response = await self._client.request(method, url, headers=self._get_headers(), **kwargs)
         response.raise_for_status()
         return response
@@ -417,8 +439,31 @@ class CapitalComClient:
             "profit_currency": confirm.get("profitCurrency"),
         }
 
+    async def get_working_orders(self) -> List[Dict[str, Any]]:
+        """Pending LIMIT/STOP orders (GET /workingorders). Raises on API errors."""
+        data = (await self._request("GET", "/workingorders")).json()
+        out = []
+        for item in data.get("workingOrders") or []:
+            wo = item.get("workingOrderData") or {}
+            out.append({"dealId": wo.get("dealId"), "epic": wo.get("epic") or (item.get("marketData") or {}).get("epic"),
+                        "direction": wo.get("direction"), "level": wo.get("orderLevel") or wo.get("level")})
+        return out
+
+    async def cancel_working_order(self, deal_id: str) -> None:
+        await self._request("DELETE", f"/workingorders/{deal_id}")
+
     async def flatten_all(self) -> None:
-        """Close every open position (used by the kill switch)."""
+        """Cancel every working order, then close every open position (used by the kill switch)."""
+        try:
+            for wo in await self.get_working_orders():
+                if wo.get("dealId"):
+                    try:
+                        await self.cancel_working_order(str(wo["dealId"]))
+                        logger.info(f"Cancelled working order {wo['dealId']}")
+                    except Exception as e:
+                        logger.error(f"Failed to cancel working order {wo.get('dealId')}: {e}")
+        except Exception as e:
+            logger.error(f"Could not list working orders: {e}")
         positions = await self.get_positions()
         if not positions:
             logger.info("No positions to flatten.")

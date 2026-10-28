@@ -79,9 +79,13 @@ class FirmOrchestrator:
         import tomllib
         with open("config/whitelist.toml", "rb") as f:
             self.whitelist = list(tomllib.load(f).get("allowed_epics") or [])
+        with open("config/limits.toml", "rb") as f:
+            self.limits = tomllib.load(f)
         self.agent_runtime = AgentRuntime(self.event_store, llm=self.llm, archive=self.archive,
-                                          tools=self.tools, whitelist=self.whitelist)
-        self.ceo = CEOManager(self.event_store)
+                                          tools=self.tools, whitelist=self.whitelist,
+                                          firm_token_budget=int(self.limits.get("operational", {})
+                                                                .get("max_token_budget_daily", 0)) or None)
+        self.ceo = CEOManager(self.event_store, on_approved=self.hire_role)
         self.scheduler = None
         self._background_tasks = []
         self._research_running = False
@@ -137,6 +141,9 @@ class FirmOrchestrator:
                     archive=self.archive,
                     gate=self.gate,
                     overlay=self.overlay,
+                    halt_file=str(HALT_FILE),
+                    max_api_errors=int(os.getenv("FIRM_MAX_API_ERRORS", "10")),
+                    api_error_window_s=float(os.getenv("FIRM_API_ERROR_WINDOW_MIN", "30")) * 60,
                 )
                 logger.info(
                     f"Trading desk armed: {', '.join(self.trading_desk.epics)} "
@@ -173,6 +180,7 @@ class FirmOrchestrator:
             asyncio.create_task(self.reconciler.run(on_mismatch=self.handle_mismatch)),
             asyncio.create_task(self.scheduler_loop()),
             asyncio.create_task(self.research_loop()),
+            asyncio.create_task(self.report_loop()),
             asyncio.create_task(self.agent_loop()),
             asyncio.create_task(self.account_snapshot_loop()),
             asyncio.create_task(self.archive_loop()),
@@ -234,8 +242,10 @@ class FirmOrchestrator:
         logger.info(f"Research run started ({why}): {', '.join(self.whitelist)} {resolution} {days}d")
         try:
             data = await pipeline.fetch_history(self.broker, self.whitelist, resolution, days, log=logger.info)
+            markets, account = await self._sizing_inputs()
             verdicts, lines, trials = await asyncio.to_thread(
-                pipeline.run_research, data, resolution, pipeline.previous_trials(self.gate.path), logger.info)
+                pipeline.run_research, data, resolution, pipeline.previous_trials(self.gate.path), logger.info,
+                markets, account)
             await asyncio.to_thread(pipeline.write_outputs, verdicts, lines, trials, resolution, self.gate.path.parent)
             self.event_store.append("RESEARCH_LAB", "RESEARCH_DONE", {"trials": trials, "resolution": resolution,
                                                                       "summary": pipeline.summarize(verdicts)})
@@ -246,6 +256,46 @@ class FirmOrchestrator:
             self.event_store.append("RESEARCH_LAB", "RESEARCH_FAILED", {"error": str(e)[:500], "why": why})
         finally:
             self._research_running = False
+
+    async def _sizing_inputs(self):
+        """Real broker numbers for the minimum-size feasibility check (missing values -> check skipped)."""
+        markets, account = {}, None
+        try:
+            acct = await self.broker.get_account_details()
+            account = {"balance": float(acct.get("balance") or 0),
+                       "risk_pct": float(self.trading_desk.limits["trade"]["max_risk_per_trade"])}
+            for epic in self.whitelist:
+                try:
+                    m = await self.broker.get_market_details(epic)
+                    bid, ask = m.get("bid"), m.get("ask")
+                    fx = await self.trading_desk._fx(m.get("currency"), acct.get("currency"))
+                    if bid and ask and fx:
+                        markets[epic] = {"price": (float(bid) + float(ask)) / 2, "min_size": m.get("min_size"), "fx": fx}
+                except Exception as e:
+                    logger.warning(f"Sizing inputs for {epic} unavailable: {e}")
+        except Exception as e:
+            logger.warning(f"Account unavailable for sizing check: {e}")
+        return markets, account
+
+    async def report_loop(self):
+        """Daily report for the previous UTC day (Phase 5 of the spec), written once per day."""
+        from datetime import datetime, timedelta, timezone
+        from src.firm.reports.daily import DailyReporter
+        reporter = DailyReporter(self.event_store, os.getenv("FIRM_REPORT_DIR", "reports"))
+        while self.is_running:
+            try:
+                day = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+                if not (reporter.out_dir / f"daily_{day}.md").exists():
+                    report = await asyncio.to_thread(reporter.generate_report, day)
+                    path = await asyncio.to_thread(reporter.save_to_disk, report)
+                    self.event_store.append("SYSTEM", "DAILY_REPORT", {"date": day, "path": str(path),
+                                                                       "fills": report["fills"],
+                                                                       "closed_trades": report["closed_trades"]})
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Daily report failed: {e}")
+            await asyncio.sleep(1800)
 
     async def research_loop(self):
         """Keeps the strategy verdicts fresh: at start when missing, then weekly or on request (min. 1 h apart)."""
@@ -263,9 +313,52 @@ class FirmOrchestrator:
             await asyncio.sleep(300)
 
     # ----------------------------------------------------------------- agents
-    def _facts(self) -> dict:
-        return build_facts(self.event_store, self.current_mode, gate=self.gate, overlay=self.overlay,
-                           desk=self.trading_desk)
+    def _role_templates(self) -> dict:
+        """name -> path of every role template in config/roles."""
+        import yaml
+        out = {}
+        for path in sorted(ROLES_DIR.glob("*.yaml")):
+            try:
+                out[yaml.safe_load(path.read_text(encoding="utf-8"))["name"]] = path
+            except Exception:
+                continue
+        return out
+
+    def hire_role(self, role: str) -> None:
+        """Called after the OPERATOR approved a hiring request. Loads the role template into the running firm."""
+        max_agents = int(self.limits.get("operational", {}).get("max_agents", 10))
+        if len(self.agent_runtime.active_agents) >= max_agents:
+            self.event_store.append("SYSTEM", "HIRING_BLOCKED", {"role": role, "reason": f"max_agents {max_agents}"})
+            return
+        path = self._role_templates().get(role)
+        if path is None:
+            self.event_store.append("SYSTEM", "HIRING_BLOCKED", {"role": role, "reason": "no such role template"})
+            return
+        self.agent_runtime.load_agent(str(path))
+        self.event_store.append("SYSTEM", "AGENT_HIRED", {"role": role})
+        logger.info(f"Agent {role} hired after operator approval.")
+
+    def _staff_facts(self) -> dict:
+        from src.firm.agents.metrics import agent_metrics, tokens_today
+        active = list(self.agent_runtime.active_agents)
+        pending = {}
+        for t in self.task_queue.list_tasks(status="PENDING", limit=500):
+            pending[t["assigned_to"]] = pending.get(t["assigned_to"], 0) + 1
+        metrics = agent_metrics(self.event_store, days=7)
+        return {
+            "active": active,
+            "available_roles": [r for r in self._role_templates() if r not in active],
+            "pending_tasks": pending,
+            "tokens_today": tokens_today(self.event_store),
+            "valid_rate_7d": {a: (metrics.get(a) or {}).get("valid_rate") for a in active},
+        }
+
+    def _facts(self, agent_name: str = "") -> dict:
+        facts = build_facts(self.event_store, self.current_mode, gate=self.gate, overlay=self.overlay,
+                            desk=self.trading_desk)
+        if agent_name == "CEO":
+            facts["staff"] = self._staff_facts()
+        return facts
 
     def _build_observation(self, agent_name: str, task: dict) -> str:
         text = f"{task['title']}\n{task['description']}"
@@ -291,6 +384,21 @@ class FirmOrchestrator:
         if kind == "flag":
             self.event_store.append(agent, "FLAG", {"severity": action["severity"], "message": action["message"]})
             return {"status": "posted"}
+        if kind == "propose_hire":
+            role = action["role"]
+            if role in self.agent_runtime.active_agents:
+                return {"status": "declined", "reason": f"{role} is already active"}
+            if role not in self._role_templates():
+                return {"status": "declined", "reason": f"no role template named {role}"}
+            if any(r.role == role and r.status.value == "PENDING" for r in self.ceo.hiring_requests.values()):
+                return {"status": "declined", "reason": "request already pending"}
+            import yaml
+            cfg = yaml.safe_load(self._role_templates()[role].read_text(encoding="utf-8"))
+            req = self.ceo.create_hiring_request(role, f"{agent}: {action['reason']}",
+                                                 {"tool_allowlist": cfg.get("tool_allowlist"),
+                                                  "actions": cfg.get("actions")},
+                                                 int(cfg.get("daily_token_budget") or 0))
+            return {"status": "awaiting operator approval", "request_id": req}
         return {"status": "ignored"}
 
     def _archive_observation(self) -> str:
@@ -341,7 +449,7 @@ class FirmOrchestrator:
                 try:
                     observation = self._build_observation(agent_name, task)
                     result = await self.agent_runtime.step(agent_name, observation, task["task_id"],
-                                                           facts=self._facts(), on_action=self.handle_agent_action)
+                                                           facts=self._facts(agent_name), on_action=self.handle_agent_action)
                     self.task_queue.complete(task["task_id"], result)
                     self._archive_task(agent_name, task, result=result)
                     logger.info(f"Completed task {task['task_id']} for {agent_name}")

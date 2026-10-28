@@ -408,7 +408,8 @@ def backtest(candles, strat: Strategy, cost_mult=1.0, slip_atr=0.03, spread_defa
                     d = 1 if side == "BUY" else -1
                     entry = nxt["o"] + d * (half_spread(i + 1) + slip_atr * atr[i] * cost_mult)
                     pos = {"side": side, "entry": entry, "stop": entry - d * sd, "dist": sd, "atr": atr[i], "i": i + 1,
-                           "tp": None if tp is None else entry + d * tp, "ts": nxt["ts"]}
+                           "tp": None if tp is None else entry + d * tp, "ts": nxt["ts"],
+                           "vol": atr[i] / entry if entry else 0.0}
     return trades
 
 
@@ -419,7 +420,8 @@ def _close(pos, px, i, why, ovn, fin=None):
     if fin and fin["pct_day"] > 0 and bars:
         nights = int(bars * fin["bar_s"] // 86400)  # ANNAHME: je volle 24 h Haltedauer eine Finanzierung
         r -= nights * fin["pct_day"] * pos["entry"] / pos["dist"]
-    return {"r": r, "side": pos["side"], "bars": bars, "why": why, "ts": pos["ts"], "entry_i": pos["i"], "exit_i": i}
+    return {"r": r, "side": pos["side"], "bars": bars, "why": why, "ts": pos["ts"], "entry_i": pos["i"], "exit_i": i,
+            "dist": pos["dist"], "entry": pos["entry"], "vol": pos.get("vol", 0.0)}
 
 
 def metrics(trades, risk_pct=0.005, span_days=None):
@@ -439,6 +441,31 @@ def metrics(trades, risk_pct=0.005, span_days=None):
             "profit_factor": (sum(w) / gl) if gl > 0 else None, "expectancy_r": sum(rs) / n,
             "t_stat": (sum(rs) / n) / (sd / math.sqrt(n)) if sd > 0 else None, "max_dd_r": dd,
             "max_dd_pct": dd * risk_pct * 100, "total_r": sum(rs)}
+
+
+def extra_stats(trades, span_days=None):
+    """Kennzahlen fuer den Bericht: annualisierte Sharpe (je Trade, ANNAHME: Trades gleichmaessig verteilt),
+    Regime-Aufschluesselung (Long/Short, hohe/niedrige Volatilitaet beim Einstieg), typischer Stop-Abstand."""
+    if not trades:
+        return {"sharpe_annual": None, "regimes": {}, "median_stop": None, "median_stop_pct": None}
+    rs = [t["r"] for t in trades]
+    sd = statistics.pstdev(rs) if len(rs) > 1 else 0.0
+    per_year = len(rs) / (span_days / 365.0) if span_days else None
+    sharpe = (sum(rs) / len(rs)) / sd * math.sqrt(per_year) if sd > 0 and per_year else None
+    vols = sorted(t.get("vol", 0.0) for t in trades)
+    med_vol = vols[len(vols) // 2]
+
+    def e(sub):
+        return {"n": len(sub), "expectancy_r": (sum(t["r"] for t in sub) / len(sub)) if sub else None}
+    regimes = {"long": e([t for t in trades if t["side"] == "BUY"]),
+               "short": e([t for t in trades if t["side"] == "SELL"]),
+               "high_vol": e([t for t in trades if t.get("vol", 0.0) > med_vol]),
+               "low_vol": e([t for t in trades if t.get("vol", 0.0) <= med_vol])}
+    dists = sorted(t["dist"] for t in trades if t.get("dist"))
+    pcts = sorted(t["dist"] / t["entry"] for t in trades if t.get("dist") and t.get("entry"))
+    return {"sharpe_annual": sharpe, "regimes": regimes,
+            "median_stop": dists[len(dists) // 2] if dists else None,
+            "median_stop_pct": pcts[len(pcts) // 2] if pcts else None}
 
 
 def bootstrap_ci(rs, runs=2000, seed=7, alpha=0.05):
@@ -515,7 +542,9 @@ def research(epic, candles, names=None, trial_counter_in=0, min_oos_trades=40, *
             verdict = "FAIL" if m["trades"] >= 15 else "INSUFFICIENT_DATA"
         if not sig_ok and verdict == "PASS":
             verdict = "FORWARD_TEST"
+        span = (candles[-1]["ts"] - candles[0]["ts"]) / 86400 * 5 / 6   # Walk-Forward testet 5 von 6 Abschnitten
         rep.update(verdict=verdict, reasons=reasons, oos=m, oos_cost2=m2, bootstrap_ci=[lo, hi], neighbours_positive=nb,
+                   extra=extra_stats(oos, span_days=span),
                    required_t=need, sig_ok=sig_ok, folds=folds, trials=trials + trials2 + len(grid_points(nm)),
                    trials_total=total_trials)
         reports.append(rep)

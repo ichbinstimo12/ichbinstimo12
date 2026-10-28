@@ -93,13 +93,51 @@ def _final_params(name: str, report: dict, candles: list) -> Optional[dict]:
     return params
 
 
-def run_research(data: Dict[str, list], resolution: str, trials_in: int = 0,
-                 log=print) -> Tuple[Dict[str, Any], List[str], int]:
-    """CPU-Teil (synchron). Rueckgabe: (verdicts, berichtszeilen, trial_counter)."""
+LANE_RISK = {"PASS": 1.0, "FORWARD_TEST": 0.5, "EXPLORE": 0.25}
+
+
+def size_feasibility(report: dict, market: Optional[dict], account: Optional[dict], lane: str) -> Optional[str]:
+    """Kann das Konto die Strategie mit der Mindestgroesse des Brokers ueberhaupt innerhalb des Risikobudgets handeln?
+    None = ja oder unbekannt; sonst Begruendung. Rechnung: Mindestgroesse x typischer Stop (Median OOS) x Wechselkurs."""
+    if not market or not account:
+        return None
+    extra = report.get("extra") or {}
+    stop_pct = extra.get("median_stop_pct")
+    price, min_size, fx = market.get("price"), market.get("min_size"), market.get("fx")
+    balance, risk_pct = account.get("balance"), account.get("risk_pct")
+    if not all(isinstance(x, (int, float)) and x > 0 for x in (stop_pct or 0, price or 0, min_size or 0, fx or 0,
+                                                               balance or 0, risk_pct or 0)):
+        return None
+    risk_at_min = float(min_size) * float(stop_pct) * float(price) * float(fx)
+    budget = float(balance) * float(risk_pct) * LANE_RISK.get(lane, 1.0)
+    if risk_at_min > budget:
+        return (f"Mindestgroesse {min_size:g} riskiert bei typischem Stop ({stop_pct:.2%}) {risk_at_min:.2f}, "
+                f"Budget nur {budget:.2f} - mit diesem Konto nicht handelbar")
+    return None
+
+
+def _table_row(epic: str, resolution: str, r: dict) -> str:
+    m, m2, x = r.get("oos") or {}, r.get("oos_cost2") or {}, r.get("extra") or {}
+    f = lambda v, fmt: (fmt % v) if isinstance(v, (int, float)) else "—"
+    return (f"| {r['strategy']} | {epic} | {resolution} | {f(x.get('sharpe_annual'), '%.2f')} | "
+            f"{f(m.get('max_dd_pct'), '%.1f%%')} | {m.get('trades', 0)} | {f((m.get('win_rate') or 0) * 100 if m.get('win_rate') is not None else None, '%.0f%%')} | "
+            f"{f(m.get('profit_factor'), '%.2f')} | {f(m.get('expectancy_r'), '%.2f')} | {f(m2.get('expectancy_r'), '%.2f')} | "
+            f"{r['verdict']} |")
+
+
+def run_research(data: Dict[str, list], resolution: str, trials_in: int = 0, log=print,
+                 markets: Optional[Dict[str, dict]] = None,
+                 account: Optional[dict] = None) -> Tuple[Dict[str, Any], List[str], int]:
+    """CPU-Teil (synchron). Rueckgabe: (verdicts, berichtszeilen, trial_counter).
+    `markets` (epic -> price, min_size, fx) und `account` (balance, risk_pct) aktivieren die Mindestgroessen-Pruefung."""
     verdicts: Dict[str, Any] = {}
     lines = ["# Forschungsbericht",
              f"Kerzen: {resolution}, Kosten inkl. echtem Spread, Slippage und Uebernacht-Finanzierung (ANNAHME, "
-             f"config/costs.toml), Walk-Forward (5 Folds). Trial-Counter vor diesem Lauf: {trials_in}\n"]
+             f"config/costs.toml), Walk-Forward (5 Folds). Trial-Counter vor diesem Lauf: {trials_in}",
+             "Widerlegungsversuche je Kandidat (automatisch): doppelte Kosten, Nachbar-Parameter, Bootstrap-Intervall, "
+             "Signifikanz gegen die Zahl der Versuche, Drawdown gegen Kontolimit, Regime-Aufteilung.\n"]
+    table = ["| Strategy | Markt | Timeframe | Sharpe (ann.) | Max DD | Trades | Trefferquote | PF | E (R) | E 2x Kosten | Verdict |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
     trials = trials_in
     bar_s = lab.RES_SECONDS.get(resolution, 3600)
     for epic, candles in data.items():
@@ -116,23 +154,38 @@ def run_research(data: Dict[str, list], resolution: str, trials_in: int = 0,
         reps, trials = lab.research(epic, candles, trial_counter_in=trials, slip_atr=costs["slip_atr"],
                                     overnight_pct_day=costs["overnight_pct_day"], bar_seconds=bar_s)
         for r in reps:
+            if r.get("oos"):
+                table.append(_table_row(epic, resolution, r))
+                reg = (r.get("extra") or {}).get("regimes") or {}
+                if reg:
+                    lines.append(f"  - {r['strategy']} Regime: " + ", ".join(
+                        f"{k} n={v['n']} E={v['expectancy_r']:.2f}R" if v.get("expectancy_r") is not None else f"{k} n=0"
+                        for k, v in reg.items()))
             oos = r.get("oos")
             lines.append(f"- **{r['strategy']}**: {r['verdict']}"
                          + (f" | OOS {oos['trades']} Trades, E={oos['expectancy_r']:.2f} R, PF={oos['profit_factor'] or 0:.2f}, "
                             f"DD={oos['max_dd_pct']:.1f}%, 2x Kosten E={r['oos_cost2']['expectancy_r']:.2f} R | " if oos else " | ")
                          + "; ".join(r["reasons"]))
         best, explore = _pick(reps)
+        mk = (markets or {}).get(epic)
         entry: Dict[str, Any]
         if best:
             params = _final_params(best["strategy"], best, candles)
             entry = {"verdict": best["verdict"], "strategy": best["strategy"], "params": params,
                      "reasons": best["reasons"], "oos_expectancy_r": best["oos"]["expectancy_r"],
                      "oos_trades": best["oos"]["trades"]}
+            why_size = size_feasibility(best, mk, account, best["verdict"])
+            if why_size:
+                entry.update(size_feasible=False, size_reason=why_size)
+                lines.append(f"- NICHT HANDELBAR: {why_size}")
         else:
             entry = {"verdict": "FAIL", "reasons": ["keine Strategie bestand die Pruefung"]}
         if explore and (not best or best["verdict"] != "PASS"):
             params = _final_params(explore["strategy"], explore, candles)
-            if params is not None or explore["strategy"] != "ml_logit":
+            why_size = size_feasibility(explore, mk, account, "EXPLORE")
+            if why_size:
+                lines.append(f"- EXPLORE nicht handelbar: {why_size}")
+            elif params is not None or explore["strategy"] != "ml_logit":
                 entry["explore"] = {"strategy": explore["strategy"], "params": params,
                                     "oos_expectancy_r": explore["oos"]["expectancy_r"],
                                     "oos_trades": explore["oos"]["trades"]}
@@ -140,7 +193,8 @@ def run_research(data: Dict[str, list], resolution: str, trials_in: int = 0,
                              f"(OOS E={explore['oos']['expectancy_r']:.2f} R, {explore['oos']['trades']} Trades, nicht signifikant)")
         verdicts[epic] = entry
         lines.append("")
-    lines.append(f"Gesamtzahl getesteter Varianten (Trial-Counter, fortgeschrieben): {trials}.")
+    lines += ["", "## Verdict-Tabelle (alle Zahlen Out-of-Sample, berechnet)", *table, "",
+              f"Gesamtzahl getesteter Varianten (Trial-Counter, fortgeschrieben): {trials}."]
     return verdicts, lines, trials
 
 
