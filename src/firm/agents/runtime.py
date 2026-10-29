@@ -351,9 +351,12 @@ class AgentRuntime:
                 answer = parsed
                 break
         except Exception as e:
-            thought = (f"[LLM_UNAVAILABLE] {config.name} could not generate a thought right now: {e}. "
+            err = f"{type(e).__name__}: {e}".rstrip(": ")      # timeouts have an empty message
+            if "Timeout" in type(e).__name__:
+                err += " (Modell zu langsam - OLLAMA_TIMEOUT erhoehen, kleineres Modell oder Anthropic)"
+            thought = (f"[LLM_UNAVAILABLE] {config.name} could not generate a thought right now: {err}. "
                        "Observation handled deterministically.")
-            logger.error(f"LLM failed for {config.name}: {e}")
+            logger.error(f"LLM failed for {config.name}: {err}")
             self.event_store.append(agent_name, "THOUGHT", {"content": thought, "task_id": task_id, "source": source,
                                                             "lessons_applied": len(lessons)}, correlation_id=task_id)
             result = {"status": "llm_unavailable", "deliverable": thought, "provider": source,

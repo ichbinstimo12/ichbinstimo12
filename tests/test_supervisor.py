@@ -40,6 +40,7 @@ def test_mcp_server_runs_with_demo_keys_and_trading_disabled(tmp_path, monkeypat
     mcp = kids["mcp"]
     assert mcp.env["CAP_ALLOW_TRADING"] == "false" and mcp.env["CAP_DRY_RUN"] == "true"
     assert mcp.env["CAP_ENV"] == "demo" and "ANTHROPIC_API_KEY" not in mcp.env
+    assert mcp.env["USERPROFILE"] == mcp.env["HOME"]          # Windows: Path.home() needs USERPROFILE
     assert "--transport" in mcp.argv and "127.0.0.1" in mcp.argv
     assert kids["brain"].env["FIRM_MCP_URL"].startswith("http://127.0.0.1:")
 

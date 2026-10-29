@@ -46,6 +46,28 @@ def _env_secret(name: str, env: Optional[Dict[str, str]] = None) -> Optional[str
     return v
 
 
+def os_ca_bundle(workdir: Path) -> Optional[str]:
+    """Windows: certifi + Root/CA-Zertifikate des Windows-Speichers als PEM-Datei fuer den MCP-Prozess (der kann
+    truststore nicht nutzen). Andere Systeme: None (dort gelten die System-Zertifikate ohnehin)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ssl
+        import certifi
+        pems = [Path(certifi.where()).read_text(encoding="ascii", errors="ignore")]
+        for store in ("ROOT", "CA"):
+            for cert, encoding, trust in ssl.enum_certificates(store):
+                if encoding == "x509_asn" and (trust is True or "1.3.6.1.5.5.7.3.1" in trust):
+                    pems.append(ssl.DER_cert_to_PEM_cert(cert))
+        path = Path(workdir) / "ca_bundle.pem"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(pems), encoding="ascii")
+        return str(path.resolve())
+    except Exception as e:
+        logger.warning(f"Windows certificate export for MCP failed: {e}")
+        return None
+
+
 class CapitalMCPTools:
     """Duenner, sicherer MCP-Client. `available` ist False, wenn Paket/Server/Zugangsdaten fehlen."""
 
@@ -70,9 +92,11 @@ class CapitalMCPTools:
                           _env_secret("CAPITAL_PASSWORD", src))
         if not (key and ident and pw):
             return None
+        home = str(self.workdir.resolve())
         env = {
             "PATH": src.get("PATH", ""),
-            "HOME": str(self.workdir.resolve()),
+            "HOME": home,
+            "USERPROFILE": home,            # Windows: Path.home() reads USERPROFILE, not HOME
             "CAP_API_KEY": key, "CAP_IDENTIFIER": ident, "CAP_API_PASSWORD": pw,
             "CAP_ENV": "demo",              # Agenten sehen nie das Live-Konto
             "CAP_ALLOW_TRADING": "false",   # Server verweigert Orders
@@ -80,9 +104,12 @@ class CapitalMCPTools:
             "CAP_ALLOWED_EPICS": "",
             "CAP_WS_ENABLED": "false",
         }
-        for k in ("SYSTEMROOT", "TEMP", "TMP", "LANG"):  # Windows/Locale
+        for k in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "LANG"):  # Windows/Locale
             if src.get(k):
                 env[k] = src[k]
+        bundle = os_ca_bundle(self.workdir)
+        if bundle:                          # same certificates as the firm (antivirus/proxy roots on Windows)
+            env["SSL_CERT_FILE"] = env["REQUESTS_CA_BUNDLE"] = bundle
         return env
 
     async def start(self) -> bool:

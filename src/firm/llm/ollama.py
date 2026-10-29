@@ -31,13 +31,14 @@ class OllamaLLM(LLMProvider):
         self,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: float = 120.0,
+        timeout: Optional[float] = None,
         client: Optional[httpx.AsyncClient] = None,
     ):
         self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)).rstrip("/")
         self.model = model or os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
-        self.timeout = timeout
-        self._client = client or httpx.AsyncClient(timeout=timeout)
+        # A 14B model on a CPU-only PC easily needs several minutes per answer.
+        self.timeout = timeout if timeout is not None else float(os.getenv("OLLAMA_TIMEOUT", "600"))
+        self._client = client or httpx.AsyncClient(timeout=self.timeout)
 
     async def generate(
         self,
