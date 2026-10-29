@@ -15,6 +15,12 @@ import time
 from pathlib import Path
 
 EXPLORE_RISK = 0.25
+INTRADAY = ("MINUTE", "MINUTE_5", "MINUTE_15", "MINUTE_30")
+
+
+def trading_style() -> str:
+    """daytrade (Standard): nur Intraday-Zeitrahmen, glattgestellt vor Sitzungsende. swing: auch HOUR/HOUR_4."""
+    return "swing" if os.getenv("FIRM_STYLE", "daytrade").strip().lower() == "swing" else "daytrade"
 
 
 def _explore_enabled() -> bool:
@@ -58,6 +64,9 @@ class StrategyGate:
                     "resolution": None, "lane": None}
 
         def yes(strategy, params, factor, reason, lane, res):
+            if trading_style() == "daytrade" and (res or resolution or "") not in INTRADAY:
+                return no(f"Urteil ist Swing ({res or resolution}); Daytrading-Modus (FIRM_STYLE=daytrade) - "
+                          "neue Forschung auf Intraday-Kerzen laeuft")
             return {"ok": True, "strategy": strategy, "params": params, "risk_factor": factor, "reason": reason,
                     "resolution": res or default_res, "lane": lane}
 

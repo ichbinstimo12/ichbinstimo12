@@ -91,3 +91,47 @@ async def test_mcp_role_allowlist(monkeypatch):
     tools = CapitalMCPTools()
     out = await tools.call("cap_market_sentiment", {"market_id": "GOLD"}, allowed=["cap_market_get"])
     assert out["ok"] is False and "Rechten" in out["error"]
+
+
+def test_routine_keeps_every_agent_working_one_after_another(tmp_path):
+    store = EventStore(str(tmp_path / "s.db"))
+    queue = TaskQueue(store.db_path, store)
+    clock = [10_000.0]
+    sched = AgentScheduler(store, queue, _agents(), now_fn=lambda: clock[0], min_gap_seconds=300,
+                           routine_seconds=1800, startup_roles=())
+    assert len(sched.tick()) == 1 and len(sched.tick()) == 1 and len(sched.tick()) == 1   # staggered start
+    assert _assigned(queue) == ["CEO", "HeadOfResearch", "RiskOfficer"]
+    assert sched.tick() == []                                    # all busy / recently worked
+    for t in queue.list_tasks(limit=100):
+        queue.complete(t["task_id"], {"status": "success"})
+    clock[0] += 1000
+    assert sched.tick() == []                                    # routine not yet due
+    clock[0] += 900
+    assert len(sched.tick()) == 1                                # 30 min later: next round
+
+
+@pytest.mark.asyncio
+async def test_llm_heartbeat_reports_only_state_changes(tmp_path, monkeypatch):
+    import asyncio
+    import json
+    from src.firm import main as firm_main
+    orch = firm_main.FirmOrchestrator.__new__(firm_main.FirmOrchestrator)
+    orch.event_store = EventStore(str(tmp_path / "h.db"))
+    orch.is_running = True
+    states = iter([None, None, ConnectionError("refused"), None])
+
+    class LLM:
+        provider_name, model = "ollama", "qwen2.5:14b"
+
+        async def ping(self):
+            err = next(states, None)
+            if err:
+                raise err
+    orch.llm = LLM()
+    monkeypatch.setenv("FIRM_LLM_HEARTBEAT_SECONDS", "0.01")
+    task = asyncio.create_task(orch.llm_heartbeat_loop())
+    await asyncio.sleep(0.2)
+    orch.is_running = False
+    await asyncio.wait_for(task, 2)
+    ev = [json.loads(e["payload_json"]) for e in orch.event_store.get_events(types=["LLM_STATUS"])]
+    assert [e["ok"] for e in ev] == [True, False, True] and "refused" in ev[1]["error"]

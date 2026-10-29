@@ -190,7 +190,8 @@ class CapitalComClient:
         if not accounts:
             raise ConnectionError("Capital.com returned no accounts for this session")
 
-        account = accounts[0]
+        # Capital.com can return several accounts (CFD, spread betting, ...); the session's preferred one trades.
+        account = next((a for a in accounts if a.get("preferred")), accounts[0])
         balance_obj = account.get("balance") or {}
         balance = balance_obj.get("balance")
         equity = balance_obj.get("equity", balance)
@@ -198,6 +199,7 @@ class CapitalComClient:
             "balance": balance,
             "equity": equity,
             "currency": account.get("currency"),
+            "account_id": account.get("accountId"),
             "available": balance_obj.get("available"),
             "profit_loss": balance_obj.get("profitLoss"),
             "source": "broker",

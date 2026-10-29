@@ -1,3 +1,5 @@
+import os
+from unittest import mock
 import json
 import tempfile
 import time
@@ -111,6 +113,7 @@ class JournalTests(unittest.TestCase):
 
 
 class GateAndHistoryTests(unittest.TestCase):
+    @mock.patch.dict(os.environ, {"FIRM_STYLE": "swing"})   # lane logic; the daytrade filter has its own test
     def test_gate(self):
         d = Path(tempfile.mkdtemp()) / "v.json"
         g = StrategyGate(d)

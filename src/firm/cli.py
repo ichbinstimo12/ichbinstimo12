@@ -163,6 +163,20 @@ async def _doctor() -> int:
         print(f"[MISSING] Unknown LLM_PROVIDER '{provider}' (use ollama or anthropic)")
         ok = False
 
+    try:
+        import tomllib
+        from src.firm.money.limits_check import limit_warnings
+        with open("config/limits.toml", "rb") as f:
+            limits = tomllib.load(f)
+        warnings = limit_warnings(limits)
+        print(f"{'[OK]' if not warnings else '[WARN]'} config/limits.toml: Risiko je Trade "
+              f"{float(limits['trade']['max_risk_per_trade']):.1%}")
+        for w in warnings:
+            print(f"       - {w}")
+    except Exception as e:
+        print(f"[MISSING] config/limits.toml unreadable: {e}")
+        ok = False
+
     roles_dir = Path(os.getenv("FIRM_ROLES_DIR", "config/roles"))
     role_count = len(list(roles_dir.glob("*.yaml"))) if roles_dir.exists() else 0
     print(f"{'[OK]' if role_count else '[MISSING]'} role configs in {roles_dir} ({role_count})")

@@ -505,12 +505,110 @@ class IntradayMomentum(Strategy):
     def params(self): return dict(k=self.k, stop_atr=self.stop_atr)
 
 
+def _smc_signals(ind: Ind, start_h: float, tz: str, ms_lookback: int, max_wait: int, min_gap_atr: float):
+    """Kausaler Durchlauf (Wert bei i nutzt nur Kerzen <= i): Liquiditaets-Sweep -> Strukturbruch -> FVG-Ruecksetzer.
+    Liquiditaet = Hoch/Tief der Vor-Sitzung (Kerzen des Tages vor start_h, z. B. Asia vor London) und des Vortages.
+    -> {"signals": je Kerze None oder (side, stop_level), "last": Lage nach der letzten Kerze}."""
+    def f():
+        out = [None] * ind.n
+        atr = ind.atr(14)
+        cur_day, pre_hi, pre_lo, day_hi, day_lo, prev_hi, prev_lo = None, None, None, None, None, None, None
+        setup = None   # dict(side, i, ext, struct, mss, fvg)
+        for i in range(ind.n):
+            h_loc, d = local_hour_day(ind.k[i].get("ts") or 0, tz)
+            if d != cur_day:
+                if cur_day is not None:
+                    prev_hi, prev_lo = day_hi, day_lo
+                cur_day, pre_hi, pre_lo, day_hi, day_lo, setup = d, None, None, None, None, None
+            hi, lo, c, a = ind.h[i], ind.l[i], ind.c[i], atr[i]
+            day_hi = hi if day_hi is None else max(day_hi, hi)
+            day_lo = lo if day_lo is None else min(day_lo, lo)
+            if h_loc < start_h:
+                pre_hi = hi if pre_hi is None else max(pre_hi, hi)
+                pre_lo = lo if pre_lo is None else min(pre_lo, lo)
+                continue
+            if a <= 0:
+                continue
+            if setup is not None:
+                bull = setup["side"] == "BUY"
+                if i - setup["i"] > max_wait:
+                    setup = None
+                else:
+                    setup["ext"] = min(setup["ext"], lo) if bull else max(setup["ext"], hi)
+                    if not setup["mss"] and (c > setup["struct"] if bull else c < setup["struct"]):
+                        setup["mss"] = True
+                    if setup["mss"] and i - 2 > setup["i"]:
+                        gap = (ind.h[i - 2], lo) if bull else (hi, ind.l[i - 2])   # (unten, oben)
+                        if gap[1] - gap[0] >= min_gap_atr * a:
+                            setup["fvg"], setup["fvg_i"] = gap, i
+                    fvg = setup.get("fvg")
+                    if fvg and setup["fvg_i"] < i:
+                        bottom, top = fvg
+                        if bull and lo <= top:
+                            if c >= bottom:
+                                out[i] = ("BUY", setup["ext"] - 0.1 * a)
+                            setup = None
+                        elif not bull and hi >= bottom:
+                            if c <= top:
+                                out[i] = ("SELL", setup["ext"] + 0.1 * a)
+                            setup = None
+                    continue
+            lows = [x for x in (pre_lo, prev_lo) if x is not None]
+            highs = [x for x in (pre_hi, prev_hi) if x is not None]
+            back = max(0, i - ms_lookback)
+            if lows and any(lo < x < c for x in lows) and i > back:
+                setup = {"side": "BUY", "i": i, "ext": lo, "struct": max(ind.h[back:i]), "mss": False}
+            elif highs and any(hi > x > c for x in highs) and i > back:
+                setup = {"side": "SELL", "i": i, "ext": hi, "struct": min(ind.l[back:i]), "mss": False}
+        stage = None
+        if setup is not None:
+            stage = "fvg" if setup.get("fvg") else "mss" if setup["mss"] else "sweep"
+        last = {"pre_session_high": pre_hi, "pre_session_low": pre_lo, "prev_day_high": prev_hi,
+                "prev_day_low": prev_lo, "stage": "entry" if ind.n and out[-1] else stage,
+                "side": (out[-1][0] if ind.n and out[-1] else (setup or {}).get("side")),
+                "sweep_extreme": (setup or {}).get("ext"), "structure_level": (setup or {}).get("struct"),
+                "fvg": (setup or {}).get("fvg")}
+        return {"signals": out, "last": last}
+    return ind._memo(("smc", start_h, tz, ms_lookback, max_wait, min_gap_atr), f)
+
+
+@dataclass
+class SmcTjr(Strategy):
+    """Smart-Money-Konzepte im Stil des Daytraders TJR (oeffentlich gelehrte Konzepte, keine Verbindung zu ihm):
+    1. Liquiditaet: Hoch/Tief der Vor-Sitzung (z. B. Asia vor London) und des Vortages.
+    2. Sweep: Kurs sticht durch ein solches Tief (Hoch) und schliesst wieder darueber (darunter) - Stops abgeholt.
+    3. Strukturbruch (Market Structure Shift): Schluss ueber dem letzten Hoch (unter dem letzten Tief) vor dem Sweep.
+    4. Einstieg beim Ruecksetzer in die Fair Value Gap der Verdraengung, Stop hinter dem Sweep-Extrem,
+       Ziel tp_r x Risiko; spaetestens Glattstellung vor Sitzungsende.
+    Edge-These: Stop-Cluster an offensichtlichen Hochs/Tiefs liefern Liquiditaet fuer Gegenbewegungen.
+    Gegenpartei: Ausbruchshaendler, deren Stops abgeholt werden. ANNAHME bis zur Forschung: ob das nach Kosten
+    traegt, entscheidet allein der Walk-Forward-Test (wie bei jeder Strategie)."""
+    name: str = "smc_tjr"
+    tp_r: float = 2.0; max_wait: int = 16; ms_lookback: int = 5; min_gap_atr: float = 0.1; intraday: bool = True
+
+    def warmup(self): return 30
+    def entry(self, ind, i):
+        sig = _smc_signals(ind, self.entry_start_h, self.session_tz, self.ms_lookback, self.max_wait,
+                           self.min_gap_atr)["signals"][i]
+        if sig is None:
+            return None
+        side, stop_level = sig
+        c, a = ind.c[i], ind.atr(14)[i]
+        sd = max((c - stop_level) if side == "BUY" else (stop_level - c), 0.5 * a)
+        return side, sd, self.tp_r * sd
+    def params(self): return dict(tp_r=self.tp_r, max_wait=self.max_wait)
+    def context(self, ind) -> dict:
+        """Lage nach der letzten Kerze: Liquiditaetsniveaus und Stufe (sweep -> mss -> fvg -> entry)."""
+        return _smc_signals(ind, self.entry_start_h, self.session_tz, self.ms_lookback, self.max_wait,
+                            self.min_gap_atr)["last"]
+
+
 REGISTRY = {"ema_state": EmaState, "donchian_trend": DonchianTrend, "ts_momentum": TsMomentum, "rsi_reversion": RsiReversion,
             "ml_logit": MLLogit, "orb": OpeningRangeBreakout, "intraday_reversion": IntradayReversion,
-            "intraday_momentum": IntradayMomentum}
-INTRADAY_ONLY = ("orb", "intraday_reversion", "intraday_momentum")
+            "intraday_momentum": IntradayMomentum, "smc_tjr": SmcTjr}
+INTRADAY_ONLY = ("orb", "intraday_reversion", "intraday_momentum", "smc_tjr")
 SWING_SET = ("ema_state", "donchian_trend", "ts_momentum", "rsi_reversion", "ml_logit")
-DAYTRADE_SET = ("orb", "intraday_reversion", "intraday_momentum", "donchian_trend", "ml_logit")
+DAYTRADE_SET = ("orb", "intraday_reversion", "intraday_momentum", "smc_tjr", "donchian_trend", "ml_logit")
 
 
 def is_intraday_resolution(resolution: str) -> bool:
@@ -529,6 +627,7 @@ GRIDS = {
     "orb": {"or_bars": [2, 4], "tp_r": [1.5, 3.0]},
     "intraday_reversion": {"z": [1.5, 2.5], "stop_atr": [1.5, 2.5]},
     "intraday_momentum": {"k": [0.5, 1.0], "stop_atr": [1.5, 2.5]},
+    "smc_tjr": {"tp_r": [2.0, 3.0], "max_wait": [12, 24]},
 }
 
 
@@ -615,7 +714,17 @@ def _close(pos, px, i, why, ovn, fin=None):
             "dist": pos["dist"], "entry": pos["entry"], "vol": pos.get("vol", 0.0)}
 
 
-def metrics(trades, risk_pct=0.005, span_days=None):
+def configured_risk_pct(path: str = "config/limits.toml") -> float:
+    """Risiko je Trade aus limits.toml (fuer Drawdown in % des Kontos in den Forschungsberichten)."""
+    try:
+        import tomllib
+        with open(path, "rb") as f:
+            return float(tomllib.load(f)["trade"]["max_risk_per_trade"])
+    except Exception:
+        return 0.005
+
+
+def metrics(trades, risk_pct=None, span_days=None):
     n = len(trades)
     if not n:
         return {"trades": 0, "win_rate": None, "avg_win_r": None, "avg_loss_r": None, "payoff": None, "profit_factor": None,
@@ -631,7 +740,7 @@ def metrics(trades, risk_pct=0.005, span_days=None):
             "avg_loss_r": (sum(l) / len(l)) if l else 0.0, "payoff": ((sum(w) / len(w)) / (-sum(l) / len(l))) if w and l and sum(l) else None,
             "profit_factor": (sum(w) / gl) if gl > 0 else None, "expectancy_r": sum(rs) / n,
             "t_stat": (sum(rs) / n) / (sd / math.sqrt(n)) if sd > 0 else None, "max_dd_r": dd,
-            "max_dd_pct": dd * risk_pct * 100, "total_r": sum(rs)}
+            "max_dd_pct": dd * (risk_pct if risk_pct is not None else configured_risk_pct()) * 100, "total_r": sum(rs)}
 
 
 def extra_stats(trades, span_days=None):

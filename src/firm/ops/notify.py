@@ -58,6 +58,19 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
         state = "alle Positionen geschlossen (vom Broker bestaetigt)" if p.get("flat") else \
             "GLATTSTELLEN NICHT BESTAETIGT - sofort im Broker pruefen!"
         return "KILL-SWITCH", f"{p.get('reason')}: {state}", HIGH, f"kill:{e['id']}"
+    if t == "LLM_STATUS":
+        if p.get("ok"):
+            return "KI wieder verbunden", f"{p.get('provider')} {p.get('model') or ''}", LOW, f"llm:{e['id']}"
+        return "KI getrennt", f"{p.get('provider')}: {str(p.get('error'))[:200]} - Agenten pausieren, Handel laeuft " \
+            "deterministisch weiter", HIGH, "llm_down"
+    if t == "LIMITS_WARNING":
+        return "Limits widerspruechlich", str(p.get("warning"))[:300], HIGH, f"limits:{str(p.get('warning'))[:40]}"
+    if t == "WHITELIST_CANDIDATE":
+        return "Neuer Markt hat die Pruefung bestanden", f"{p.get('epic')}: {p.get('verdict')} mit {p.get('strategy')} " \
+            f"({p.get('resolution')}). Zum Handeln in config/whitelist.toml eintragen - deine Entscheidung.", NORMAL, \
+            f"wl:{p.get('epic')}"
+    if t == "ACCOUNT_BOUND":
+        return "Konto erkannt", f"{p.get('account')} (Hoechststand/Tagesstart neu)", NORMAL, f"acct:{p.get('account')}"
     if t == "CIRCUIT_BREAKER":
         return "Schnellbremse", str(p.get("reason")), HIGH, "breaker"
     if t == "STRATEGY_STOPPED":
@@ -92,7 +105,7 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
     return None
 
 
-NOTIFY_TYPES = ["ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
+NOTIFY_TYPES = ["ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
                 "BROKER_OFFLINE", "RESEARCH_FAILED", "BACKUP_FAILED", "INJECTION_SUSPECTED", "STREAM_DISCONNECTED",
                 "DESK_IDLE", "RESEARCH_DONE", "DAILY_REPORT", "HIRING_REQUEST", "PLAYBOOK_PROPOSED", "PROMOTION_CHECK"]
 

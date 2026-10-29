@@ -79,6 +79,7 @@ def test_pipeline_writes_verdicts_and_continues_the_trial_counter(tmp_path):
 
 def test_gate_live_mode_never_trades_forward_test_or_explore(tmp_path, monkeypatch):
     monkeypatch.setenv("FIRM_DEMO_EXPLORE", "1")
+    monkeypatch.setenv("FIRM_STYLE", "swing")
     path = tmp_path / "v.json"
     import time
     path.write_text(json.dumps({"created": time.time(), "resolution": "HOUR", "verdicts": {

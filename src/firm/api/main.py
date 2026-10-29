@@ -190,6 +190,20 @@ def create_app(
             "mcp_tools": list(getattr(getattr(orchestrator, "tools", None), "tools", []) or []),
         }
 
+    def halt_reason() -> Optional[str]:
+        """Why the firm stands still (text of the halt flag), so nobody has to guess."""
+        try:
+            return HALT_FILE.read_text(encoding="utf-8").strip()[:300] if HALT_FILE.exists() else None
+        except OSError:
+            return "halt flag present (unreadable)"
+
+    def llm_status() -> Optional[Dict[str, Any]]:
+        ev = store.get_events(types=["LLM_STATUS"], last=1)
+        if not ev:
+            return None
+        p = json.loads(ev[-1]["payload_json"] or "{}")
+        return {"ok": p.get("ok"), "since": ev[-1]["ts"], "error": p.get("error")}
+
     def status_payload() -> Dict[str, Any]:
         snapshot = latest_snapshot()
         desk = getattr(orchestrator, "trading_desk", None)
@@ -209,7 +223,7 @@ def create_app(
             "trading": {
                 "enabled": desk is not None if orchestrator is not None else os.getenv("FIRM_TRADING", "1") != "0",
                 "epics": list(getattr(desk, "epics", []) or []) or whitelist(),
-                "resolution": getattr(desk, "resolution", None) or os.getenv("FIRM_TRADE_RESOLUTION", "HOUR"),
+                "resolution": getattr(desk, "resolution", None) or os.getenv("FIRM_TRADE_RESOLUTION", "MINUTE_15"),
             },
             "stream": (snapshot or {}).get("stream"),
             "snapshot_ts": snapshot_ts(),
@@ -219,6 +233,8 @@ def create_app(
             "strategy": strategy_payload(),
             "kill_switch_active": bool(getattr(getattr(orchestrator, "kill_switch", None), "is_active", False))
             or HALT_FILE.exists(),
+            "halt_reason": halt_reason(),
+            "llm_status": llm_status(),
             "agents": [{"name": c["name"], "role": c["role"]} for c in agent_configs()],
             "alerts": alerts_payload(),
             "promotion": last_payload("PROMOTION_CHECK"),
@@ -236,7 +252,7 @@ def create_app(
 
     ALERT_TYPES = ["TRADING_HALTED", "STRATEGY_STOPPED", "STRATEGY_WARNING", "BROKER_OFFLINE", "DESK_IDLE",
                    "RESEARCH_FAILED", "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "FLAG",
-                   "INJECTION_SUSPECTED", "CIRCUIT_BREAKER", "KILL_SWITCH", "BACKUP_FAILED"]
+                   "INJECTION_SUSPECTED", "CIRCUIT_BREAKER", "KILL_SWITCH", "BACKUP_FAILED", "LIMITS_WARNING"]
 
     def alerts_payload() -> List[Dict[str, Any]]:
         """Alarm-Leiste: die letzten Warnungen der letzten 24 Stunden (echte Events)."""

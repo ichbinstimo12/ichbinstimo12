@@ -92,6 +92,15 @@ class OllamaLLM(LLMProvider):
             usage=usage,
         )
 
+    async def ping(self) -> None:
+        """Server up AND the configured model pulled (GET /api/tags, no generation)."""
+        r = await self._client.get(f"{self.base_url}/api/tags", timeout=10)
+        r.raise_for_status()
+        names = {m.get("name", "") for m in (r.json().get("models") or [])}
+        base = self.model.split(":")[0]
+        if self.model not in names and not any(n.split(":")[0] == base for n in names):
+            raise RuntimeError(f"model {self.model} not pulled (ollama pull {self.model})")
+
     async def close(self) -> None:
         try:
             await self._client.aclose()

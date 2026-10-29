@@ -34,7 +34,7 @@ from src.firm.research.lab import RES_SECONDS
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TradingDesk")
 
-DEFAULT_RESOLUTION = "HOUR"  # v2: 1-Stunden-Kerzen (15-Min war Rauschen + Kostenfalle)
+DEFAULT_RESOLUTION = "MINUTE_15"  # Daytrading; die Forschung waehlt je Markt 15 oder 5 Minuten
 DEFAULT_LOOKBACK = 400  # genug Vorlauf fuer EMA200/Donchian
 
 
@@ -246,6 +246,19 @@ class DeskState:
             tmp.replace(self.path)  # atomic: a crash never leaves a half-written state file
         except Exception as e:
             logger.warning(f"Could not persist desk state: {e}")
+
+    def bind_account(self, key: str) -> Optional[str]:
+        """Peak and day start belong to ONE account in ONE mode. A different account (demo reset, demo -> live,
+        other sub-account) must not inherit them: a demo peak of 1000 against a live balance of 200 would read as
+        an 80 % drawdown and halt the firm on its first cycle. Returns the previous key when it changed."""
+        previous = self.data.get("account_key")
+        if previous == key:
+            return None
+        for k in ("day", "day_start_balance", "peak_balance"):
+            self.data.pop(k, None)
+        self.data["account_key"] = key
+        self._save()
+        return previous or "unbound"
 
     def day_start_balance(self, today: str, balance: float) -> float:
         if self.data.get("day") != today or not self.data.get("day_start_balance"):
@@ -608,6 +621,13 @@ class TradingDesk:
             summary["error"] = f"account unavailable: {e}"
             logger.error(summary["error"])
             return summary
+
+        account_key = f"{self.mode}:{account.get('account_id') or '-'}:{account.get('currency') or '-'}"
+        previous_key = self.state.bind_account(account_key)
+        if previous_key is not None:
+            self.event_store.append("TRADING_DESK", "ACCOUNT_BOUND", {
+                "account": account_key, "previous": previous_key,
+                "action": "peak and day start reset to this account's equity"})
 
         # Limits are measured on EQUITY (includes open P&L) and the UTC trading day.
         today = datetime.now(timezone.utc).date().isoformat()

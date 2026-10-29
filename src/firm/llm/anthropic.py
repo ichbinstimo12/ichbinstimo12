@@ -86,6 +86,10 @@ class AnthropicLLM(LLMProvider):
             usage=usage_dict,
         )
 
+    async def ping(self) -> None:
+        """Key valid and model available (models endpoint, no tokens billed)."""
+        await self._client.models.retrieve(self.model, timeout=15)
+
     async def close(self) -> None:
         try:
             await self._client.aclose()

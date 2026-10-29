@@ -79,6 +79,23 @@ DELEGATION_PLAN: Dict[str, Dict[str, str]] = {
             "tighten risk on that market to 0 for up to 48 h and say which kill criterion fired."
         ),
     },
+    "SMCAnalyst": {
+        "title": "SMC-Lage (TJR-Stil)",
+        "description": (
+            "Read FACTS.smc_setups and FACTS.scanner (computed deterministically by the scanner). For each market "
+            "with an active setup: liquidity level, sweep, structure shift, fair value gap, session, news risk. Judge "
+            "quality with facts only. Block entries only with a concrete sourced reason; request research for "
+            "markets where setups repeat without a verdict. Never place orders."
+        ),
+    },
+    "SMCTrader": {
+        "title": "SMC-Ausfuehrung pruefen (TJR-Stil)",
+        "description": (
+            "A fill, rejection or closed trade happened. Check it against the SMC plan (entry in the gap, stop beyond "
+            "the sweep, target >= 2R, right session) and against FACTS.journal statistics. Tighten risk only on a "
+            "losing pattern backed by FACTS. Never place, move or close orders."
+        ),
+    },
     "Archivist": {
         "title": "Gedaechtnis pruefen",
         "description": (
@@ -105,9 +122,12 @@ class AgentScheduler:
     """Erzeugt Aufgaben aus Ereignissen und Zeitplaenen. Zustand liegt nur im Speicher (Neustart = neues Lagebild)."""
 
     def __init__(self, event_store, task_queue, agents: Dict[str, Any], now_fn=time.time,
-                 min_gap_seconds: float = MIN_GAP_SECONDS, startup_roles=("CEO", "RiskOfficer")):
+                 min_gap_seconds: float = MIN_GAP_SECONDS, startup_roles=("CEO", "RiskOfficer"),
+                 routine_seconds: float = 0.0):
         self.event_store, self.task_queue, self.agents, self.now = event_store, task_queue, agents, now_fn
         self.min_gap = min_gap_seconds
+        # Routine: every agent works at least every `routine_seconds` on the current FACTS (0 = events only).
+        self.routine = routine_seconds
         self._last_task: Dict[str, float] = {}
         self._last_periodic: Dict[str, float] = {}
         # Only events after the scheduler started count (no replay of old history after a restart).
@@ -177,4 +197,16 @@ class AgentScheduler:
                 if tid:
                     created.append(tid)
                     self._last_periodic[name] = now
+
+        # Routine: agents without work for `routine` seconds get a check on the current FACTS.
+        # One per tick, so agents come online one after another instead of all hitting the LLM at once.
+        if self.routine > 0:
+            for name in self.agents:
+                last = self._last_task.get(name)
+                if last is not None and now - last < self.routine:
+                    continue
+                tid = self._create(name, f"routine check (every {self.routine / 60:g} min): anything new in FACTS?")
+                if tid:
+                    created.append(tid)
+                    break
         return created

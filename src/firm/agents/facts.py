@@ -80,6 +80,25 @@ def build_facts(event_store, mode: str, gate=None, overlay=None, desk=None) -> D
                                                                            if k in ("epic", "reason", "reasons", "agent", "error")}}
                               for e in alerts]
 
+    uni = event_store.get_events(types=["UNIVERSE_UPDATED"], last=1)
+    if uni:
+        p = _payload(uni[-1])
+        facts["scanner"] = {
+            "universe_updated_utc": uni[-1].get("ts"), "markets_total": p.get("markets_total"),
+            "top_candidates": [{k: c.get(k) for k in ("epic", "spread_pct", "change_pct")}
+                               for c in (p.get("candidates") or [])[:8]],
+            "recent_hits": [{k: v for k, v in _payload(e).items() if k in ("epic", "strategy", "side", "whitelisted")}
+                            | {"ts": e.get("ts")} for e in event_store.get_events(types=["SCANNER_HIT"], last=8)],
+        }
+    setups: Dict[str, Any] = {}
+    for e in event_store.get_events(types=["SMC_SETUP"], last=40):
+        p = _payload(e)
+        if p.get("epic"):
+            setups[p["epic"]] = {"stage": p.get("stage"), "side": p.get("side"), "whitelisted": p.get("whitelisted"),
+                                 "levels": p.get("levels"), "ts": e.get("ts")}
+    if setups:
+        facts["smc_setups"] = dict(list(setups.items())[-10:])
+
     if overlay is not None:
         facts["risk_overlays"] = [
             {"epic": r["epic"], "factor": r["factor"], "agent": r["agent_id"], "reason": r["reason"],

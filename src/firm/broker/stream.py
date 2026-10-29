@@ -131,6 +131,26 @@ class PriceStream:
             await asyncio.sleep(backoff)
             backoff = min(60.0, backoff * 2)
 
+    async def set_epics(self, epics: List[str]) -> Dict[str, List[str]]:
+        """Neue Abo-Liste (Reihenfolge = Prioritaet, max. 40; die Whitelist steht vorn). Laufende Verbindung:
+        abbestellen, was wegfaellt, dann den Rest abonnieren - ohne Neuverbindung."""
+        new = list(dict.fromkeys(epics))[:MAX_EPICS]
+        removed = [e for e in self.epics if e not in new]
+        added = [e for e in new if e not in self.epics]
+        self.epics = new
+        for e in removed:
+            self.quotes.pop(e, None)
+        ws = self._ws
+        if ws is not None and self.connected:
+            try:
+                if removed:
+                    await self._send(ws, "marketData.unsubscribe", {"epics": removed}, corr="unsub")
+                if added:
+                    await self._send(ws, "marketData.subscribe", {"epics": added}, corr="sub")
+            except Exception as e:      # the reconnect loop subscribes the full new list
+                self.last_error = f"resubscribe: {type(e).__name__}: {e}"
+        return {"added": added, "removed": removed}
+
     async def stop(self) -> None:
         self._running = False
         if self._ws is not None:

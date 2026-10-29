@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -28,16 +29,21 @@ from src.firm.llm.factory import get_llm_provider
 logging.basicConfig(level=logging.INFO, format='%(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("FirmOrchestrator")
 
+from src.firm.research.lab import RES_SECONDS  # noqa: E402
+
 HALT_FILE = Path(os.getenv("FIRM_HALT_FILE", "firm.halt"))
 ROLES_DIR = Path(os.getenv("FIRM_ROLES_DIR", "config/roles"))
 DEFAULT_ACTIVE_ROLES = "CEO,HeadOfResearch,RiskOfficer,MacroAnalyst,ExecutionTrader,RedTeam"
 
 
 def research_resolutions(desk_default: str) -> list:
-    """Zeitrahmen der Forschung. Standard: Daytrading (15 Minuten) UND Swing (1 Stunde); je Markt gewinnt,
-    was die Pruefung besteht."""
-    raw = os.getenv("FIRM_RESEARCH_RESOLUTIONS", "MINUTE_15,HOUR")
+    """Zeitrahmen der Forschung. Standard (FIRM_STYLE=daytrade): nur Intraday, 15 und 5 Minuten; je Markt gewinnt,
+    was die Pruefung besteht. Swing-Zeitrahmen aus einer alten .env werden im Daytrading-Modus ignoriert."""
+    from src.firm.money.strategy_gate import INTRADAY, trading_style
+    raw = os.getenv("FIRM_RESEARCH_RESOLUTIONS", "MINUTE_15,MINUTE_5")
     out = [r.strip().upper() for r in raw.split(",") if r.strip()]
+    if trading_style() == "daytrade":
+        out = [r for r in out if r in INTRADAY] or ["MINUTE_15", "MINUTE_5"]
     return out or [desk_default]
 
 
@@ -106,6 +112,7 @@ class FirmOrchestrator:
         self.scheduler = None
         self.trading_desk = None
         self.stream = None
+        self.scanner = None
         self._background_tasks = []
         self._research_running = False
         self.zones = {"money", "brain"}
@@ -128,6 +135,10 @@ class FirmOrchestrator:
         await self._run_until_halt()
 
     async def _start_money(self, mode: str):
+        from src.firm.money.limits_check import limit_warnings
+        for w in limit_warnings(self.limits):
+            logger.warning(f"LIMITS: {w}")
+            self.event_store.append("RISK", "LIMITS_WARNING", {"warning": w, "file": "config/limits.toml"})
 
         # 1. Broker connection. With credentials we NEVER fall back to the mock silently: a failed login used to
         #    leave the firm running on a simulation that cannot trade, without anyone noticing. The real client
@@ -176,6 +187,19 @@ class FirmOrchestrator:
             from src.firm.broker.stream import PriceStream
             self.stream = PriceStream(self.broker.stream_credentials, self.whitelist, event_store=self.event_store)
 
+        # 3a. Market scanner: whole Capital.com list -> best candidates into the stream, 1-second scan.
+        self.scanner = None
+        if (not isinstance(self.broker, MockBrokerClient)
+                and os.getenv("FIRM_SCANNER", "1").strip().lower() not in ("0", "false", "no", "off")):
+            from src.firm.money.scanner import MarketScanner
+            self.scanner = MarketScanner(
+                self.broker, self.stream, self.event_store, self.whitelist,
+                resolution=os.getenv("FIRM_SCANNER_RESOLUTION", "MINUTE_5"),
+                universe_size=int(os.getenv("FIRM_SCANNER_UNIVERSE", "36")),
+                universe_hours=float(os.getenv("FIRM_SCANNER_UNIVERSE_HOURS", "6")),
+                rps=float(os.getenv("FIRM_SCANNER_RPS", "2")),
+                max_spread_pct=float(os.getenv("FIRM_SCANNER_MAX_SPREAD_PCT", "0.1")))
+
         # 3b. Deterministic trading desk. The LLM never sizes or places a trade.
         self.trading_desk = None
         if os.getenv("FIRM_TRADING", "1").strip().lower() not in ("0", "false", "no", "off"):
@@ -187,7 +211,7 @@ class FirmOrchestrator:
                     event_store=self.event_store,
                     mode=mode,
                     state_path=os.getenv("FIRM_STATE_PATH", "firm_state.json"),
-                    resolution=os.getenv("FIRM_TRADE_RESOLUTION", "HOUR"),
+                    resolution=os.getenv("FIRM_TRADE_RESOLUTION", "MINUTE_15"),
                     cooldown_seconds=float(os.getenv("FIRM_TRADE_COOLDOWN", "0")),
                     archive=self.archive,
                     gate=self.gate,
@@ -225,10 +249,17 @@ class FirmOrchestrator:
             self._background_tasks.append(asyncio.create_task(self.trading_loop()))
         if self.stream is not None:
             self._background_tasks.append(asyncio.create_task(self.stream.run()))
+        if self.scanner is not None:
+            self._background_tasks.append(asyncio.create_task(
+                self.scanner.run(float(os.getenv("FIRM_SCAN_SECONDS", "1")))))
 
     async def _start_brain(self):
         # 4. Load role configs (Brain-Zone staffing) + agents hired earlier with operator approval
         active_roles = [n.strip() for n in os.getenv("FIRM_ACTIVE_ROLES", DEFAULT_ACTIVE_ROLES).split(",") if n.strip()]
+        # Roles added after an .env was written (FIRM_ACTIVE_ROLES there predates them); "-" disables.
+        added = os.getenv("FIRM_ADD_ROLES", "SMCAnalyst,SMCTrader,Archivist")
+        if added.strip() != "-":
+            active_roles += [n.strip() for n in added.split(",") if n.strip() and n.strip() not in active_roles]
         loaded = self.agent_runtime.load_agents_from_dir(str(ROLES_DIR), only=active_roles)
         if loaded:
             logger.info(f"Active agents: {', '.join(loaded)}")
@@ -249,8 +280,12 @@ class FirmOrchestrator:
         if os.getenv("FIRM_MCP_URL") or not isinstance(self.broker, MockBrokerClient) and self.broker is not None:
             await self.tools.start()
         logger.info(f"Agent tools: {'MCP ' + ', '.join(self.tools.tools) if self.tools.available else self.tools.reason}")
-        self.scheduler = AgentScheduler(self.event_store, self.task_queue, self.agent_runtime.active_agents)
+        self.scheduler = AgentScheduler(
+            self.event_store, self.task_queue, self.agent_runtime.active_agents,
+            min_gap_seconds=float(os.getenv("FIRM_AGENT_MIN_GAP_MIN", "10")) * 60,
+            routine_seconds=float(os.getenv("FIRM_AGENT_ROUTINE_MIN", "30")) * 60)
         self._background_tasks += [
+            asyncio.create_task(self.llm_heartbeat_loop()),
             asyncio.create_task(self.scheduler_loop()),
             asyncio.create_task(self.agent_loop()),
             asyncio.create_task(self.hiring_loop()),
@@ -298,6 +333,27 @@ class FirmOrchestrator:
                 logger.error(f"Hiring loop error: {e}")
             await asyncio.sleep(10)
 
+    async def llm_heartbeat_loop(self):
+        """Is the agents' LLM reachable? Checked every minute without generating tokens; changes become an
+        LLM_STATUS event (dashboard header, notifications). The agents retry on their own once it is back."""
+        interval = float(os.getenv("FIRM_LLM_HEARTBEAT_SECONDS", "60"))
+        last_ok: Optional[bool] = None
+        while self.is_running:
+            ok, error = True, None
+            try:
+                await asyncio.wait_for(self.llm.ping(), timeout=20)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                ok, error = False, f"{type(e).__name__}: {str(e)[:200]}"
+            if ok != last_ok:
+                self.event_store.append("BRAIN", "LLM_STATUS", {
+                    "ok": ok, "provider": getattr(self.llm, "provider_name", "?"),
+                    "model": getattr(self.llm, "model", None), "error": error})
+                (logger.info if ok else logger.error)(f"LLM {'connected' if ok else 'unreachable: ' + str(error)}")
+                last_ok = ok
+            await asyncio.sleep(interval)
+
     async def scheduler_loop(self):
         """Event-driven task creation (see agents/delegation.py). Replaces the old 60-second standing agenda."""
         interval = float(os.getenv("FIRM_SCHEDULER_SECONDS", "30"))
@@ -320,6 +376,11 @@ class FirmOrchestrator:
             return f"requested by {requested[-1].get('agent_id')}"
         if self.gate.is_stale(max_age_days * 86400):
             return "no verdicts yet" if not self.gate.created() else f"verdicts older than {max_age_days:g} days"
+        wanted = research_resolutions(self.trading_desk.resolution if self.trading_desk else "MINUTE_15")
+        have = self.gate.overview().get("resolution") or []
+        have = [have] if isinstance(have, str) else list(have)
+        if sorted(have) != sorted(wanted):
+            return f"timeframes changed: verdicts for {have}, configured {wanted}"
         return None
 
     async def run_research(self, why: str) -> None:
@@ -331,14 +392,17 @@ class FirmOrchestrator:
         self._research_running = True
         self._last_research_attempt = asyncio.get_running_loop().time()
         resolutions = research_resolutions(self.trading_desk.resolution)
-        self.event_store.append("RESEARCH_LAB", "RESEARCH_STARTED", {"why": why, "epics": self.whitelist,
+        extra = self.scanner_candidates()
+        epics = self.whitelist + extra
+        self.event_store.append("RESEARCH_LAB", "RESEARCH_STARTED", {"why": why, "epics": epics,
+                                                                     "scanner_candidates": extra,
                                                                      "resolutions": resolutions})
-        logger.info(f"Research run started ({why}): {', '.join(self.whitelist)} {resolutions}")
+        logger.info(f"Research run started ({why}): {', '.join(epics)} {resolutions}")
         try:
             data_by_res = {}
             for res in resolutions:
                 days = history_days(res)
-                data_by_res[res] = await pipeline.fetch_history(self.broker, self.whitelist, res, days, log=logger.info)
+                data_by_res[res] = await pipeline.fetch_history(self.broker, epics, res, days, log=logger.info)
             markets, account = await self._sizing_inputs()
             verdicts, lines, trials = await asyncio.to_thread(
                 pipeline.run_research_multi, data_by_res, pipeline.previous_trials(self.gate.path), logger.info,
@@ -347,11 +411,32 @@ class FirmOrchestrator:
             self.event_store.append("RESEARCH_LAB", "RESEARCH_DONE", {"trials": trials, "resolutions": resolutions,
                                                                       "summary": pipeline.summarize(verdicts)})
             logger.info(f"Research run done: {pipeline.summarize(verdicts)}")
+            for epic in extra:
+                v = verdicts.get(epic) or {}
+                if v.get("verdict") in ("PASS", "FORWARD_TEST"):
+                    self.event_store.append("RESEARCH_LAB", "WHITELIST_CANDIDATE", {
+                        "epic": epic, "verdict": v.get("verdict"), "strategy": v.get("strategy"),
+                        "resolution": v.get("resolution"), "oos_expectancy_r": v.get("oos_expectancy_r"),
+                        "action": f"zum Handeln in config/whitelist.toml unter allowed_epics eintragen (Entscheidung "
+                                  f"des Operators)"})
         except Exception as e:
             logger.error(f"Research run failed: {e}")
             self.event_store.append("RESEARCH_LAB", "RESEARCH_FAILED", {"error": str(e)[:500], "why": why})
         finally:
             self._research_running = False
+
+    def scanner_candidates(self) -> list:
+        """Top-K markets from the scanner's latest universe that are not on the whitelist (research only).
+        More markets = more trials: the trial counter and deflated statistics in the lab account for that."""
+        k = int(os.getenv("FIRM_RESEARCH_UNIVERSE", "6"))
+        if k <= 0:
+            return []
+        ev = self.event_store.get_events(types=["UNIVERSE_UPDATED"], last=1)
+        if not ev:
+            return []
+        import json as _json
+        cands = (_json.loads(ev[-1]["payload_json"] or "{}").get("candidates") or [])
+        return [c["epic"] for c in cands if c.get("epic") and c["epic"] not in self.whitelist][:k]
 
     async def _sizing_inputs(self):
         """Real broker numbers for the minimum-size feasibility check (missing values -> check skipped)."""
@@ -360,7 +445,7 @@ class FirmOrchestrator:
             acct = await self.broker.get_account_details()
             account = {"balance": float(acct.get("balance") or 0),
                        "risk_pct": float(self.trading_desk.limits["trade"]["max_risk_per_trade"])}
-            for epic in self.whitelist:
+            for epic in self.whitelist + self.scanner_candidates():
                 try:
                     m = await self.broker.get_market_details(epic)
                     bid, ask = m.get("bid"), m.get("ask")
@@ -670,7 +755,25 @@ class FirmOrchestrator:
                 raise
             except Exception as e:
                 logger.error(f"Trading loop error: {e}")
-            await asyncio.sleep(interval)
+            await self._sleep_until_next_bar(interval)
+
+    def _desk_resolutions(self) -> set:
+        res = {self.trading_desk.resolution} if self.trading_desk is not None else set()
+        for v in (self.gate.overview().get("verdicts") or {}).values():
+            if v.get("resolution"):
+                res.add(v["resolution"])
+        return {r for r in res if r in RES_SECONDS}
+
+    async def _sleep_until_next_bar(self, max_interval: float) -> None:
+        """Wake ~2 s after the next candle closes on any traded timeframe (signals use closed candles only),
+        at the latest after `max_interval` seconds. Checked every second."""
+        now = time.time()
+        wake = now + max_interval
+        for r in self._desk_resolutions():
+            bar = RES_SECONDS[r]
+            wake = min(wake, (now // bar + 1) * bar + 2.0)
+        while self.is_running and time.time() < wake:
+            await asyncio.sleep(min(1.0, max(0.05, wake - time.time())))
 
     async def account_snapshot_loop(self):
         """Publish real account snapshots (with open positions) for the dashboard."""
@@ -683,6 +786,8 @@ class FirmOrchestrator:
                     snapshot["source"] = "mock" if isinstance(self.broker, MockBrokerClient) else "broker"
                     if self.stream is not None:
                         snapshot["stream"] = self.stream.status()
+                    if self.scanner is not None:
+                        snapshot["scanner"] = self.scanner.status()
                     try:
                         positions = await self.broker.get_positions()
                         snapshot["positions"] = positions

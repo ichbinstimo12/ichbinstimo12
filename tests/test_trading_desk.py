@@ -200,7 +200,8 @@ class FakeBroker:
 
 
 @pytest.fixture
-def desk_env(tmp_path):
+def desk_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("FIRM_STYLE", "swing")   # desk mechanics on hourly fixtures; daytrade filter tested separately
     limits_file = tmp_path / "limits.toml"
     limits_file.write_text(LIMITS)
     whitelist_file = tmp_path / "whitelist.toml"
@@ -525,3 +526,25 @@ async def test_desk_uses_the_timeframe_the_research_chose(desk_env):
     desk.gate = StrategyGate(str(path))
     await desk.run_cycle()
     assert broker.candle_requests == ["MINUTE_15"]
+
+
+def test_desk_state_does_not_carry_a_peak_into_another_account(tmp_path):
+    """Demo peak 1000 must not count as an 80 % drawdown on a 200 CHF live account (halted the firm on start)."""
+    from src.firm.money.trading_desk import DeskState
+    st = DeskState(str(tmp_path / "s.json"))
+    assert st.bind_account("PAPER:D1:CHF") == "unbound"
+    st.day_start_balance("2026-10-29", 1000.0)
+    assert st.peak_balance(1000.0) == 1000.0
+    assert st.bind_account("PAPER:D1:CHF") is None                 # same account: keep history
+    assert DeskState(str(tmp_path / "s.json")).peak_balance(950.0) == 1000.0
+    assert st.bind_account("LIVE_MICRO:L1:CHF") == "PAPER:D1:CHF"  # other account: fresh start
+    assert st.peak_balance(200.0) == 200.0 and st.day_start_balance("2026-10-29", 200.0) == 200.0
+
+
+@pytest.mark.asyncio
+async def test_daytrade_style_desk_skips_a_swing_verdict(desk_env, monkeypatch):
+    monkeypatch.setenv("FIRM_STYLE", "daytrade")
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker)
+    summary = await desk.run_cycle()
+    assert broker.orders == [] and "Daytrading" in summary["skipped"][0]["reason"]

@@ -75,7 +75,8 @@ def test_multi_timeframe_research_records_the_winning_resolution(tmp_path):
             assert v["params"]["intraday"] is True and "flat_h" in v["params"]
 
 
-def test_gate_returns_the_per_market_resolution(tmp_path):
+def test_gate_returns_the_per_market_resolution(tmp_path, monkeypatch):
+    monkeypatch.setenv("FIRM_STYLE", "swing")
     path = tmp_path / "v.json"
     path.write_text(json.dumps({"created": time.time(), "resolution": ["MINUTE_15", "HOUR"], "verdicts": {
         "EURUSD": {"verdict": "PASS", "strategy": "orb", "params": SESSION, "resolution": "MINUTE_15"},
@@ -100,3 +101,20 @@ def test_sessions_follow_daylight_saving_time():
 def test_session_config_includes_timezone():
     base = pipeline.load_session("AAPL")
     assert base["session_tz"] == "America/New_York" and base["intraday"] is True
+
+
+def test_daytrade_style_blocks_swing_verdicts_and_ignores_swing_timeframes(tmp_path, monkeypatch):
+    from src.firm.main import research_resolutions
+    monkeypatch.delenv("FIRM_STYLE", raising=False)
+    path = tmp_path / "v.json"
+    path.write_text(json.dumps({"created": time.time(), "resolution": ["MINUTE_15", "HOUR"], "verdicts": {
+        "EURUSD": {"verdict": "PASS", "strategy": "orb", "params": SESSION, "resolution": "MINUTE_15"},
+        "GOLD": {"verdict": "PASS", "strategy": "donchian_trend", "params": {}, "resolution": "HOUR"}}}))
+    gate = StrategyGate(str(path))
+    assert gate.decide("EURUSD", True, "PAPER", "MINUTE_15")["ok"]
+    gold = gate.decide("GOLD", True, "PAPER", "MINUTE_15")
+    assert not gold["ok"] and "Daytrading" in gold["reason"]
+    monkeypatch.setenv("FIRM_RESEARCH_RESOLUTIONS", "MINUTE_15,HOUR")      # old .env
+    assert research_resolutions("MINUTE_15") == ["MINUTE_15"]
+    monkeypatch.delenv("FIRM_RESEARCH_RESOLUTIONS")
+    assert research_resolutions("MINUTE_15") == ["MINUTE_15", "MINUTE_5"]

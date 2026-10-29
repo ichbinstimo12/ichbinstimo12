@@ -86,3 +86,18 @@ def test_ollama_generate_parses_response(monkeypatch):
     assert response.usage == {"input_tokens": 12, "output_tokens": 34}
     asyncio.run(client.aclose())
 
+
+
+@pytest.mark.asyncio
+async def test_ollama_ping_checks_server_and_model():
+    import httpx
+    from src.firm.llm.ollama import OllamaLLM
+
+    def handler(req):
+        return httpx.Response(200, json={"models": [{"name": "qwen2.5:14b"}]})
+    llm = OllamaLLM(base_url="http://x", model="qwen2.5:14b", client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await llm.ping()
+    llm.model = "llama3.1:8b"
+    with pytest.raises(RuntimeError, match="not pulled"):
+        await llm.ping()
+    await llm.close()

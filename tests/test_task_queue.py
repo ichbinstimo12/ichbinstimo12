@@ -74,9 +74,8 @@ def test_delegation_plan_only_for_known_agents():
 
 
 def test_every_role_has_a_plan():
-    roles = {
-        "CEO", "HeadOfResearch", "QuantDeveloper", "RiskOfficer",
-        "DataEngineer", "MacroAnalyst", "ExecutionTrader", "RedTeam",
-        "Archivist",
-    }
+    import yaml
+    from pathlib import Path
+    roles = {yaml.safe_load(p.read_text(encoding="utf-8"))["name"] for p in Path("config/roles").glob("*.yaml")}
+    assert {"CEO", "SMCAnalyst", "SMCTrader", "Archivist"} <= roles
     assert roles == set(DELEGATION_PLAN.keys())

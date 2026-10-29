@@ -154,6 +154,8 @@
     color: #ffd9df; padding: 10px 14px; border-radius: 8px; display: none; }
   .toast.show { display: block; }
   ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #1a2532; border-radius: 4px; }
+  .halt-reason { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 5; max-width: 90%;
+    background: #7f1d1d; color: #fff; border: 1px solid #fb7185; border-radius: 8px; padding: 6px 12px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -164,6 +166,7 @@
     <span class="pill" title="Verbindung zum Dashboard-Server"><span id="ws-dot" class="dot"></span><span id="ws-label">VERBINDE</span></span>
     <span class="pill" title="Broker-Kontostand: Alter des letzten Snapshots"><span id="broker-dot" class="dot"></span><span id="broker-label">BROKER —</span></span>
     <span class="pill" title="Live-Kursstream (WebSocket)"><span id="stream-dot" class="dot"></span><span id="stream-label">KURSE —</span></span>
+    <span class="pill" title="Ist das LLM der Agenten erreichbar? (Pruefung jede Minute)"><span id="ki-dot" class="dot"></span><span id="ki-label">KI —</span></span>
     <div class="metrics">
       <div class="metric"><span class="k">KONTOSTAND</span><span class="v" id="balance">—</span></div>
       <div class="metric"><span class="k">EQUITY</span><span class="v" id="equity">—</span></div>
@@ -182,6 +185,7 @@
       <div class="panel-head"><h2>BÜRO</h2><span class="hint" id="floor-hint">Klick auf einen Roboter: Details</span></div>
       <div id="office-wrap">
         <canvas id="office" width="1200" height="720" tabindex="0" aria-label="Büroansicht mit Robotern; Tab wählt Agenten"></canvas>
+        <div class="halt-reason" id="halt-reason" role="alert" hidden></div>
         <div class="offline" id="offline">OFFLINE<small>Backend nicht erreichbar · angezeigte Werte sind nicht aktuell</small></div>
       </div>
       <div class="legend">
@@ -348,6 +352,12 @@
     const maxAge = ages.length ? Math.max(...ages) : null;
     $("stream-dot").className = "dot " + (!st ? "" : st.connected && maxAge !== null && maxAge < 30 ? "ok" : st.connected ? "warn" : "bad");
     $("stream-label").textContent = !st ? "KURSE REST" : st.connected ? `KURSE LIVE · ${fmtAge(maxAge)}` : "KURSE AUS";
+    const ki = ok && s.llm_status;
+    $("ki-dot").className = "dot " + (!ki ? "" : ki.ok ? "ok" : "bad");
+    $("ki-label").textContent = !ki ? "KI —" : ki.ok ? "KI VERBUNDEN" : "KI GETRENNT";
+    $("ki-label").parentElement.title = ki && !ki.ok ? `LLM nicht erreichbar seit ${timeOf(ki.since)}: ${ki.error || ""}` : "LLM der Agenten erreichbar";
+    const halt = $("halt-reason");
+    if (halt) { halt.hidden = !(ok && s.halt_reason); halt.textContent = ok && s.halt_reason ? `HALT: ${s.halt_reason} · Wiederanlauf: firmctl.sh resume` : ""; }
   }
   function renderAlarms() {
     const list = (state.status && state.status.alerts) || [];
@@ -624,7 +634,8 @@
   ];
   const SEATS = {
     CEO: { x: 166, y: 130 }, HeadOfResearch: { x: 430, y: 120 }, QuantDeveloper: { x: 592, y: 120 }, DataEngineer: { x: 754, y: 120 },
-    RiskOfficer: { x: 960, y: 200 }, MacroAnalyst: { x: 166, y: 390 }, ExecutionTrader: { x: 592, y: 430 },
+    RiskOfficer: { x: 960, y: 200 }, MacroAnalyst: { x: 90, y: 390 }, SMCAnalyst: { x: 240, y: 390 },
+    ExecutionTrader: { x: 480, y: 430 }, SMCTrader: { x: 704, y: 430 },
     RedTeam: { x: 1026, y: 440 }, Archivist: { x: 166, y: 620 },
   };
   const SPARE = [{ x: 520, y: 620 }, { x: 680, y: 620 }, { x: 840, y: 620 }, { x: 1000, y: 620 }];

@@ -114,6 +114,7 @@ async def test_account_details_are_normalised():
         "balance": 1000.0,
         "equity": 1012.5,
         "currency": "CHF",
+        "account_id": None,
         "available": 900.0,
         "profit_loss": 12.5,
         "source": "broker",
@@ -222,4 +223,20 @@ async def test_flatten_all_uses_delete():
     await client.authenticate()
     await client.flatten_all()
     assert methods == ["DELETE"]
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_account_details_use_the_preferred_account():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/session"):
+            return httpx.Response(200, headers={"CST": "c", "X-SECURITY-TOKEN": "s"}, json={})
+        return httpx.Response(200, json={"accounts": [
+            {"accountId": "SB1", "currency": "GBP", "balance": {"balance": 50.0}},
+            {"accountId": "CFD1", "preferred": True, "currency": "CHF", "balance": {"balance": 1000.0}}]})
+
+    client = make_client(handler)
+    await client.authenticate()
+    details = await client.get_account_details()
+    assert details["account_id"] == "CFD1" and details["balance"] == 1000.0
     await client.close()

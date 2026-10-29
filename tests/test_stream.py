@@ -62,7 +62,8 @@ def test_old_quotes_are_not_used():
 
 
 @pytest.mark.asyncio
-async def test_desk_rejects_entries_on_a_stale_stream(tmp_path):
+async def test_desk_rejects_entries_on_a_stale_stream(tmp_path, monkeypatch):
+    monkeypatch.setenv("FIRM_STYLE", "swing")
     from tests.test_trading_desk import (FakeBroker, breakout_closes, build_gated_desk, hourly_candles, LIMITS,
                                          WHITELIST)
     from src.firm.bus.event_store import EventStore

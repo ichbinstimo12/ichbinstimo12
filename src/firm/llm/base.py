@@ -39,6 +39,10 @@ class LLMProvider(ABC):
         [{"role": "system", "content": "..."}, {"role": "user", "content": "..."}]
         """
 
+    async def ping(self) -> None:
+        """Cheap reachability check without generating tokens. Raises when the provider is unreachable."""
+        return None
+
     @abstractmethod
     async def close(self) -> None:
         """Release resources (HTTP client, SDK client, ...)."""
