@@ -163,3 +163,16 @@ def test_429_pauses_the_host(tmp_path):
     except Exception:
         pass
     assert len(calls) == 2
+
+
+def test_drawdown_stop_sells_everything(tmp_path):
+    now, src = [NOW], FakeSources()
+    d, store = desk(tmp_path, src, now)
+    asyncio.run(d.scan())
+    d.state["peak"] = 20.0                                  # equity ~10 -> -50 % from peak
+    now[0] += 60
+    asyncio.run(d.manage())                                 # detects drawdown -> halted
+    assert d.state["halted"] and any(l["limit"] == "drawdown" for l in types(store, "MEME_LIMIT"))
+    now[0] += 5
+    asyncio.run(d.manage())
+    assert d.state["positions"] == {} and "Desk-Stopp" in types(store, "MEME_TRADE_CLOSE")[0]["reason"]

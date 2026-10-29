@@ -260,7 +260,8 @@ class MemeDesk:
     # ------------------------------------------------------------------ manage open positions
     async def manage(self) -> List[Dict[str, Any]]:
         closed = []
-        killed = self._killed()
+        # Kill-Switch or a full stop (drawdown -20 %): sell everything, not just stop buying
+        killed = self._killed() or bool(self.state.get("halted"))
         marked = float(self.state["equity"])
         mints = list(self.state["positions"])
         try:
@@ -276,7 +277,7 @@ class MemeDesk:
                 continue
             pos["last_value"] = value
             paper.mark(pos, value, self.now(), self.cfg["exits"]["time_stop_band_pct"])
-            alerts = ["Kill-Switch"] if killed else await self._alerts(mint, pos)
+            alerts = [f"Desk-Stopp ({self.state.get('halted') or 'Kill-Switch'})"] if killed else await self._alerts(mint, pos)
             dec = paper.exit_decision(pos, value, self.now(), self.cfg, self.limits, alerts)
             if dec:
                 reason, frac = dec
@@ -384,7 +385,7 @@ class MemeDesk:
                     f"{len(self.wallets)} wallets).")
 
         async def manage_if_open():
-            if self.state["positions"] or self._killed():
+            if self.state["positions"] or self._killed() or self.state.get("halted"):
                 await self.manage()
         tasks = [asyncio.create_task(self._every("scout", float(loop["scan_seconds"]), self.scan, is_running)),
                  asyncio.create_task(self._every("manage", float(loop["manage_seconds"]), manage_if_open, is_running))]
