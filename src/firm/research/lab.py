@@ -118,6 +118,28 @@ def day_utc(ts: float) -> int:
     return int(ts // 86400)
 
 
+_TZ_CACHE: dict = {}
+
+
+def local_hour_day(ts: float, tz: str = "") -> tuple:
+    """(Stunde als Dezimalzahl, Tagesnummer) in der Ortszeit `tz` (z. B. "Europe/London"); leer = UTC.
+    Sommer-/Winterzeit wird damit automatisch beruecksichtigt."""
+    if not tz:
+        return hour_utc(ts), day_utc(ts)
+    key = (tz, int(ts // 900))                      # 15-Minuten-Raster reicht und spart Rechenzeit
+    hit = _TZ_CACHE.get(key)
+    if hit is None:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+        d = _dt.fromtimestamp(int(ts // 900) * 900, ZoneInfo(tz))
+        hit = (d.hour + d.minute / 60.0, d.toordinal())
+        if len(_TZ_CACHE) > 500_000:
+            _TZ_CACHE.clear()
+        _TZ_CACHE[key] = hit
+    base_h, day = hit
+    return base_h + (ts % 900) / 3600.0, day
+
+
 @dataclass
 class Strategy:
     name: str = "base"
@@ -127,21 +149,28 @@ class Strategy:
     entry_start_h: float = 7.0
     entry_end_h: float = 19.0
     flat_h: float = 20.0
+    session_tz: str = ""          # Zeitzone der Sitzungszeiten (leer = UTC), z. B. "Europe/London"
 
     def can_enter_at(self, ts: float) -> bool:
         """Einstieg zum Zeitpunkt ts (Eroeffnung der Folgekerze) erlaubt?"""
         if not self.intraday:
             return True
-        h = hour_utc(ts)
+        h, _ = local_hour_day(ts, self.session_tz)
         return self.entry_start_h <= h < min(self.entry_end_h, self.flat_h)
 
     def must_flat(self, entry_ts: float, ts: float) -> bool:
-        """Intraday-Position spaetestens zur Glattstellungsstunde bzw. bei Tageswechsel schliessen."""
-        return self.intraday and (day_utc(ts) != day_utc(entry_ts) or hour_utc(ts) >= self.flat_h)
+        """Intraday-Position spaetestens zur Glattstellungsstunde bzw. bei Tageswechsel (Ortszeit) schliessen."""
+        if not self.intraday:
+            return False
+        h, d = local_hour_day(ts, self.session_tz)
+        return d != local_hour_day(entry_ts, self.session_tz)[1] or h >= self.flat_h
+
+    def same_session_day(self, ts_a: float, ts_b: float) -> bool:
+        return local_hour_day(ts_a, self.session_tz)[1] == local_hour_day(ts_b, self.session_tz)[1]
 
     def session(self) -> dict:
         return dict(intraday=self.intraday, entry_start_h=self.entry_start_h, entry_end_h=self.entry_end_h,
-                    flat_h=self.flat_h) if self.intraday else {}
+                    flat_h=self.flat_h, session_tz=self.session_tz) if self.intraday else {}
 
     def warmup(self) -> int: return 60
     def entry(self, ind: Ind, i: int):          # -> (side, stop_dist, tp_dist|None) | None
@@ -369,26 +398,26 @@ class MLLogit(Strategy):
 
 
 # ----------------------------------------------------------- Daytrading-Familie
-def _session_start(ind: Ind, start_h: float):
-    """Index der ersten Kerze des UTC-Tages mit Stunde >= start_h (None, solange die Sitzung noch nicht begann)."""
+def _session_start(ind: Ind, start_h: float, tz: str = ""):
+    """Index der ersten Kerze des Tages (Ortszeit tz) mit Stunde >= start_h (None, solange die Sitzung noch nicht begann)."""
     def f():
         out, cur_day, first = [], None, None
         for i in range(ind.n):
             ts = ind.k[i].get("ts") or 0
-            d = day_utc(ts)
+            h, d = local_hour_day(ts, tz)
             if d != cur_day:
                 cur_day, first = d, None
-            if first is None and hour_utc(ts) >= start_h:
+            if first is None and h >= start_h:
                 first = i
             out.append(first)
         return out
-    return ind._memo(("sess", start_h), f)
+    return ind._memo(("sess", start_h, tz), f)
 
 
-def _session_mean(ind: Ind, start_h: float):
+def _session_mean(ind: Ind, start_h: float, tz: str = ""):
     """Mittelwert der Schlusskurse seit Sitzungsbeginn (kausal, inkl. Kerze i)."""
     def f():
-        st, out, acc, cnt, cur = _session_start(ind, start_h), [], 0.0, 0, None
+        st, out, acc, cnt, cur = _session_start(ind, start_h, tz), [], 0.0, 0, None
         for i in range(ind.n):
             if st[i] is None:
                 out.append(None); continue
@@ -397,7 +426,7 @@ def _session_mean(ind: Ind, start_h: float):
             acc += ind.c[i]; cnt += 1
             out.append(acc / cnt)
         return out
-    return ind._memo(("smean", start_h), f)
+    return ind._memo(("smean", start_h, tz), f)
 
 
 @dataclass
@@ -410,7 +439,7 @@ class OpeningRangeBreakout(Strategy):
 
     def warmup(self): return 60
     def entry(self, ind, i):
-        st = _session_start(ind, self.entry_start_h)[i]
+        st = _session_start(ind, self.entry_start_h, self.session_tz)[i]
         if st is None or i < st + self.or_bars:
             return None
         hi = max(ind.h[st:st + self.or_bars]); lo = min(ind.l[st:st + self.or_bars])
@@ -437,7 +466,7 @@ class IntradayReversion(Strategy):
 
     def warmup(self): return 60
     def entry(self, ind, i):
-        m = _session_mean(ind, self.entry_start_h)[i]
+        m = _session_mean(ind, self.entry_start_h, self.session_tz)[i]
         a, c, r = ind.atr(14)[i], ind.c[i], ind.rsi(2)[i]
         if m is None or a <= 0:
             return None
@@ -458,7 +487,7 @@ class IntradayMomentum(Strategy):
 
     def warmup(self): return 60
     def _dir(self, ind, i):
-        st = _session_start(ind, self.entry_start_h)[i]
+        st = _session_start(ind, self.entry_start_h, self.session_tz)[i]
         a = ind.atr(14)[i]
         if st is None or i - st < 4 or a <= 0:
             return None
@@ -559,7 +588,7 @@ def backtest(candles, strat: Strategy, cost_mult=1.0, slip_atr=0.03, spread_defa
                     pos = None
                     continue
         if pos is None:
-            if strat.intraday and (not strat.can_enter_at(nxt["ts"]) or day_utc(nxt["ts"]) != day_utc(candles[i]["ts"])):
+            if strat.intraday and (not strat.can_enter_at(nxt["ts"]) or not strat.same_session_day(nxt["ts"], candles[i]["ts"])):
                 continue
             sig = strat.entry(ind, i)
             if sig:

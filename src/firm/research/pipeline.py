@@ -118,10 +118,10 @@ def load_session(epic: str, path: str | Path = "config/sessions.toml") -> Dict[s
         data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
-    out = {"entry_start_h": 7.0, "entry_end_h": 19.0, "flat_h": 20.0}
+    out = {"entry_start_h": 7.0, "entry_end_h": 19.0, "flat_h": 20.0, "session_tz": ""}
     out.update(data.get("default") or {})
     out.update((data.get("epic") or {}).get(epic) or {})
-    return {"intraday": True, **{k: float(v) for k, v in out.items()}}
+    return {"intraday": True, **{k: (str(v) if k == "session_tz" else float(v)) for k, v in out.items()}}
 
 
 def _final_params(name: str, report: dict, candles: list, base: Optional[dict] = None) -> Optional[dict]:
@@ -181,7 +181,8 @@ def run_research_multi(data_by_res: Dict[str, Dict[str, list]], trials_in: int =
             q = history.quality_report(candles, resolution)
             lines.append(f"## {epic} {resolution} ({'Daytrading' if intraday else 'Swing'}; {q['bars']} Kerzen, "
                          f"{q['span_days']:.0f} Tage, Luecken {q['big_gaps']}, mittl. Spread {q['avg_spread_pct'] or 0:.3f}%"
-                         + (f", Fenster {base['entry_start_h']:g}-{base['entry_end_h']:g} UTC, flat {base['flat_h']:g} UTC"
+                         + (f", Fenster {base['entry_start_h']:g}-{base['entry_end_h']:g}, flat {base['flat_h']:g} "
+                            f"({base.get('session_tz') or 'UTC'})"
                             if base else f", Finanzierung {costs['overnight_pct_day'] * 100:.3f}%/Tag") + ")")
             log(f"Pruefe {epic} {resolution} ({q['bars']} Kerzen) ...")
             reps, trials = lab.research(epic, candles, names=lab.candidates_for(resolution), trial_counter_in=trials,

@@ -1,0 +1,23 @@
+# HTTPS-Zugang zum Dashboard (Profil "https"). Zertifikat holt Caddy automatisch.
+# Zwei Schutzschichten: Passwort (basic auth) hier + FIRM_API_TOKEN im Dashboard.
+https://{$FIRM_DOMAIN} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		-Server
+	}
+	# Gesundheitsstatus ohne Passwort (enthaelt keine Kontozahlen) - fuer externe Uptime-Dienste
+	@health path /health /health/deep
+	handle @health {
+		reverse_proxy firm:8000
+	}
+	handle {
+		basic_auth {
+			{$CADDY_USER} {$CADDY_PASSWORD_HASH}
+		}
+		reverse_proxy firm:8000
+	}
+}

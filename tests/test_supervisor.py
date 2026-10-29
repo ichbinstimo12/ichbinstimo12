@@ -47,3 +47,54 @@ def test_mcp_server_runs_with_demo_keys_and_trading_disabled(tmp_path, monkeypat
 def test_filtered_env_drops_prefixes():
     out = filtered_env({"CAPITAL_X": "1", "OTHER": "2", "FIRM_API_TOKEN": "t"}, ("CAPITAL_",))
     assert out == {"OTHER": "2", "FIRM_NO_DOTENV": "1", "PYTHONUNBUFFERED": "1"}
+
+
+def test_notify_zone_only_when_configured_and_only_it_sees_notify_tokens(tmp_path):
+    assert "notify" not in _plan(tmp_path, FIRM_MCP="0")
+    kids = _plan(tmp_path, FIRM_MCP="0", NOTIFY_TELEGRAM_BOT_TOKEN="123:abc", NOTIFY_TELEGRAM_CHAT_ID="42",
+                 HEALTHCHECK_PING_URL="https://hc.example/x")
+    notify = kids["notify"].env
+    assert notify["NOTIFY_TELEGRAM_BOT_TOKEN"] == "123:abc" and notify["HEALTHCHECK_PING_URL"]
+    assert not any(k.startswith(("CAPITAL_", "CAP_", "ANTHROPIC_")) for k in notify) and "FIRM_API_TOKEN" not in notify
+    for other in ("money", "brain", "api"):
+        assert not any(k.startswith(("NOTIFY_", "HEALTHCHECK_")) for k in kids[other].env)
+
+
+def test_wait_on_halt_returns_when_operator_resumes(tmp_path, monkeypatch):
+    import asyncio
+    import types
+    from src.firm import cli
+    halt = tmp_path / "firm.halt"
+    halt.write_text("x")
+    monkeypatch.setattr(cli, "HALT_FILE", halt)
+
+    async def scenario():
+        task = asyncio.create_task(cli._wait_while_halted(types.SimpleNamespace(dashboard=False)))
+        await asyncio.sleep(0.2)
+        assert not task.done()            # still halted: nothing starts
+        halt.unlink()                     # python -m src.firm resume
+        return await asyncio.wait_for(task, 10)
+
+    assert asyncio.run(scenario()) is True
+
+
+def test_sigterm_stops_children_in_order_and_marks_termination(tmp_path):
+    import asyncio
+    import os
+    import signal
+    import sys
+    from src.firm.supervisor import Child
+
+    sup = Supervisor("PAPER", False, "127.0.0.1", 8000, tmp_path / "halt", env=dict(ENV))
+    sleeper = [sys.executable, "-c", "import time; time.sleep(60)"]
+    sup.plan = lambda: [Child("money", sleeper, {"PATH": "/usr/bin"}), Child("brain", sleeper, {"PATH": "/usr/bin"})]
+
+    async def scenario():
+        task = asyncio.create_task(sup.run())
+        await asyncio.sleep(1.0)
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.wait_for(task, 30)
+
+    asyncio.run(scenario())
+    # run() must only return once every zone has really stopped (else docker kills them mid-shutdown)
+    assert sup.terminated and sup._stopped.is_set() and all(c.proc.returncode is not None for c in sup.children)

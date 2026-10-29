@@ -1,29 +1,59 @@
+# 24/7-Betrieb auf einem Server.  Start:  docker compose up -d   (Anleitung: docs/deploy_vps.md)
+#   Mit HTTPS-Zugang vom Handy:          docker compose --profile https up -d
+#   Mit lokalem Ollama statt Anthropic:  docker compose --profile ollama up -d
 services:
   firm:
     build: .
+    image: trading-firm:latest
     env_file:
       - .env
     environment:
       FIRM_API_TOKEN: ${FIRM_API_TOKEN:?set FIRM_API_TOKEN in .env}
-      FIRM_HALT_FILE: /app/data/firm.halt      # Halt-Flag ueberlebt Neustarts
-      FIRM_OPEN_BROWSER: "0"                    # auf dem Server gibt es keinen Browser
+      FIRM_ALLOWED_ORIGINS: ${FIRM_ALLOWED_ORIGINS:-http://127.0.0.1:8000,http://localhost:8000}
     volumes:
-      - ./firm_events.db:/app/firm_events.db    # vorher: touch firm_events.db firm_state.json
-      - ./firm_state.json:/app/firm_state.json  # Tagesstart-Kontostand, Peak, Regeln
-      - ./data:/app/data                        # Forschungsurteile, Historie, Halt-Flag
-      - ./archiv:/app/archiv
-      - ./config:/app/config:ro
-      - ./web:/app/web:ro
+      - ./data:/app/data                 # ALLES Laufzeitliche (DB, Zustand, Halt-Flag, Backups, Berichte)
+      - ./config:/app/config:ro          # limits.toml & Co.: nur du aenderst sie auf dem Host
     ports:
-      - "127.0.0.1:8000:8000"                   # NUR lokal erreichbar; Zugriff per SSH-Tunnel
-    command: python -m src.firm run --dashboard --host 0.0.0.0 --port 8000
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+      - "127.0.0.1:8000:8000"            # nur lokal; von aussen per SSH-Tunnel oder ueber das https-Profil
+    restart: unless-stopped
+    stop_grace_period: 90s               # Zeit zum Glattstellen beim Stoppen
+    init: false                          # tini ist im Image
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "5"}
+    mem_limit: 2g
+
+  # Optional: HTTPS mit automatischem Let's-Encrypt-Zertifikat + zusaetzlichem Passwort davor.
+  caddy:
+    image: caddy:2.8
+    profiles: ["https"]
+    depends_on: [firm]
+    environment:
+      # beide in .env setzen (docs/deploy_vps.md, Schritt 6); ohne sie startet Caddy nicht
+      FIRM_DOMAIN: ${FIRM_DOMAIN:-}
+      CADDY_USER: ${CADDY_USER:-firm}
+      CADDY_PASSWORD_HASH: ${CADDY_PASSWORD_HASH:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
     restart: unless-stopped
     logging:
       driver: json-file
-      options: {max-size: "10m", max-file: "5"}
+      options: {max-size: "10m", max-file: "3"}
+
+  # Optional: lokales LLM auf dem Server (braucht viel RAM/CPU; fuer kleine VPS ist Anthropic sinnvoller).
+  ollama:
+    image: ollama/ollama:0.4.7
+    profiles: ["ollama"]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:
+  ollama:

@@ -236,7 +236,7 @@ def create_app(
 
     ALERT_TYPES = ["TRADING_HALTED", "STRATEGY_STOPPED", "STRATEGY_WARNING", "BROKER_OFFLINE", "DESK_IDLE",
                    "RESEARCH_FAILED", "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "FLAG",
-                   "INJECTION_SUSPECTED", "CIRCUIT_BREAKER"]
+                   "INJECTION_SUSPECTED", "CIRCUIT_BREAKER", "KILL_SWITCH", "BACKUP_FAILED"]
 
     def alerts_payload() -> List[Dict[str, Any]]:
         """Alarm-Leiste: die letzten Warnungen der letzten 24 Stunden (echte Events)."""
@@ -284,6 +284,15 @@ def create_app(
     async def health():
         """Unauthenticated liveness probe (no firm data is exposed)."""
         return {"status": "ok"}
+
+    @app.get("/health/deep")
+    async def health_deep():
+        """Zones alive? 200 = all fresh, 503 = something is down or halted. No account figures (safe to expose to
+        an uptime monitor)."""
+        from fastapi.responses import JSONResponse
+        from src.firm.ops.health import zone_health
+        h = zone_health(store, HALT_FILE, float(os.getenv("FIRM_HEALTH_MONEY_MAX_AGE", "300")))
+        return JSONResponse(h, status_code=200 if h["ok"] else 503)
 
     @app.get("/api/status", dependencies=[Depends(require_token)])
     async def get_status():
@@ -468,6 +477,13 @@ def create_app(
     # ---------------- WebSocket ----------------
     @app.websocket("/ws/office")
     async def office_websocket(websocket: WebSocket):
+        # Browsers always send Origin on WebSockets; CORS does not cover them, so check it here
+        # (blocks a foreign web page from riding a token it found in the URL/history).
+        origin = websocket.headers.get("origin")
+        if origin and origin not in origins:
+            await websocket.accept()
+            await websocket.close(code=4403)
+            return
         if token:
             provided = websocket.query_params.get("token", "")
             if not provided or not secrets.compare_digest(provided, token):

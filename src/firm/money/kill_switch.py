@@ -36,7 +36,7 @@ class KillSwitch:
                     for pos in await self.broker.get_positions():
                         if pos.get("dealId"):
                             await self.broker.close_position(str(pos["dealId"]))
-                else:
+                elif await self.broker.get_positions():
                     raise RuntimeError("broker can neither flatten nor close positions")
 
                 # 2. Verify with the broker: open positions must really be gone.

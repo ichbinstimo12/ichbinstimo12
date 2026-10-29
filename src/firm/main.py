@@ -164,7 +164,8 @@ class FirmOrchestrator:
 
         # 3. Initialize Money-Zone with the chosen broker
         self.risk_gate = RiskGate("config/limits.toml", "config/whitelist.toml")
-        self.execution_gateway = ExecutionGateway(self.broker, self.risk_gate, self.event_store, mode=mode)
+        self.execution_gateway = ExecutionGateway(self.broker, self.risk_gate, self.event_store, mode=mode,
+                                                  live_token_path=os.getenv("FIRM_LIVE_TOKEN_FILE", "live_token.json"))
         self.kill_switch = KillSwitch(self.broker)
         self.reconciler = Reconciler(self.broker, self.event_store)
 
@@ -185,6 +186,7 @@ class FirmOrchestrator:
                     risk_gate=self.risk_gate,
                     event_store=self.event_store,
                     mode=mode,
+                    state_path=os.getenv("FIRM_STATE_PATH", "firm_state.json"),
                     resolution=os.getenv("FIRM_TRADE_RESOLUTION", "HOUR"),
                     cooldown_seconds=float(os.getenv("FIRM_TRADE_COOLDOWN", "0")),
                     archive=self.archive,
@@ -262,8 +264,7 @@ class FirmOrchestrator:
                 if HALT_FILE.exists():
                     if "money" in self.zones:
                         logger.critical(f"HALT flag detected ({HALT_FILE}). Activating kill switch and stopping.")
-                        if self.kill_switch:
-                            await self.kill_switch.activate()
+                        await self._kill("halt flag")
                     else:
                         logger.critical(f"HALT flag detected ({HALT_FILE}). Brain zone stopping.")
                     self.is_running = False
@@ -282,9 +283,13 @@ class FirmOrchestrator:
             logger.warning(f"Agent registry not written: {e}")
 
     async def hiring_loop(self):
-        """Agents approved in the dashboard (another process) are loaded here."""
+        """Agents approved in the dashboard (another process) are loaded here. Also the brain's heartbeat."""
+        beat = 0.0
         while self.is_running:
             try:
+                if asyncio.get_running_loop().time() - beat > 300:
+                    self._sync_registry()             # updated_at = Lebenszeichen fuer /health/deep
+                    beat = asyncio.get_running_loop().time()
                 for req in self.ceo.approved_unapplied():
                     if req.role not in self.agent_runtime.active_agents:
                         self.hire_role(req.role)
@@ -379,6 +384,16 @@ class FirmOrchestrator:
                 today = datetime.now(timezone.utc).date().isoformat()
                 if last_check_day != today:
                     await self.run_promotion_check()
+                    try:
+                        from src.firm.ops.backup import backup_now
+                        target = await asyncio.to_thread(backup_now, self.db_path, os.getenv("FIRM_BACKUP_DIR", "data/backups"),
+                                                         int(os.getenv("FIRM_BACKUP_KEEP", "14")),
+                                                         ("data/strategy_verdicts.json",
+                                                          os.getenv("FIRM_STATE_PATH", "firm_state.json")))
+                        logger.info(f"Backup written: {target}")
+                    except Exception as e:
+                        logger.error(f"Backup failed: {e}")
+                        self.event_store.append("SYSTEM", "BACKUP_FAILED", {"error": str(e)[:300]})
                     last_check_day = today
                 day = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
                 if not (reporter.out_dir / f"daily_{day}.md").exists():
@@ -698,8 +713,15 @@ class FirmOrchestrator:
         if self.broker:
             await self.broker.close()
 
+    async def _kill(self, reason: str) -> None:
+        """Kill switch + audit event (flat confirmed by the broker or not)."""
+        flat = await self.kill_switch.activate() if self.kill_switch else None
+        try:
+            self.event_store.append("KILL_SWITCH", "KILL_SWITCH", {"reason": reason, "flat": flat})
+        except Exception as e:
+            logger.error(f"KILL_SWITCH event not written: {e}")
+
     async def handle_mismatch(self):
         logger.critical("RECONCILER MISMATCH DETECTED! Triggering KillSwitch...")
-        if self.kill_switch:
-            await self.kill_switch.activate()
+        await self._kill("reconciler mismatch")
         self.is_running = False

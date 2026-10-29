@@ -83,3 +83,20 @@ def test_gate_returns_the_per_market_resolution(tmp_path):
     gate = StrategyGate(str(path))
     assert gate.decide("EURUSD", True, "PAPER", "HOUR")["resolution"] == "MINUTE_15"
     assert gate.decide("GOLD", True, "PAPER", "HOUR")["resolution"] == "HOUR"
+
+
+def test_sessions_follow_daylight_saving_time():
+    """24/7-Betrieb: New-York-Sitzung beginnt im Winter 14:30 UTC, im Sommer 13:30 UTC."""
+    from datetime import datetime, timezone
+    s = lab.REGISTRY["orb"](intraday=True, entry_start_h=9.5, entry_end_h=14.5, flat_h=15.75, session_tz="America/New_York")
+    winter = datetime(2026, 1, 15, 14, 35, tzinfo=timezone.utc).timestamp()
+    summer = datetime(2026, 7, 15, 13, 35, tzinfo=timezone.utc).timestamp()
+    assert s.can_enter_at(winter) and s.can_enter_at(summer)
+    assert not s.can_enter_at(datetime(2026, 7, 15, 12, 35, tzinfo=timezone.utc).timestamp())   # 08:35 NY
+    assert s.must_flat(summer, datetime(2026, 7, 15, 19, 50, tzinfo=timezone.utc).timestamp())   # 15:50 NY
+    assert not s.must_flat(summer, datetime(2026, 7, 15, 19, 40, tzinfo=timezone.utc).timestamp())
+
+
+def test_session_config_includes_timezone():
+    base = pipeline.load_session("AAPL")
+    assert base["session_tz"] == "America/New_York" and base["intraday"] is True

@@ -5,6 +5,8 @@
   mcp    capitalcom-mcp als lokaler HTTP-Dienst (127.0.0.1), Demo-Schluessel, Trading serverseitig AUS
   brain  Agenten, Scheduler, LLM -> OHNE Broker-Schluessel (auch .env wird nicht gelesen)
   api    Dashboard -> ohne Broker- und LLM-Schluessel
+  notify Handy-Benachrichtigungen + Totmannschalter-Ping (nur wenn NOTIFY_*/HEALTHCHECK_PING_URL gesetzt)
+         -> ohne Broker- und LLM-Schluessel; die Benachrichtigungs-Tokens kennt nur dieser Prozess
 
 Faellt ein Prozess aus, wird er mit wachsender Pause neu gestartet. Stuerzt der money-Prozess zu oft ab
 (5x in 10 Minuten), wird das Halt-Flag gesetzt: lieber stehen als unkontrolliert handeln.
@@ -27,6 +29,7 @@ logger = logging.getLogger("Supervisor")
 
 BROKER_KEYS = ("CAPITAL_", "CAP_")
 LLM_KEYS = ("ANTHROPIC_",)
+NOTIFY_KEYS = ("NOTIFY_", "HEALTHCHECK_")
 ALWAYS_DROP = ("FIRM_API_TOKEN",)
 
 
@@ -63,14 +66,16 @@ class Supervisor:
         self.base_env = dict(env if env is not None else os.environ)
         self.children: List[Child] = []
         self.stopping = False
+        self.terminated = False        # stopped by a signal (docker stop), not by a halt
+        self._stopped: Optional[asyncio.Event] = None
 
     # ------------------------------------------------------------ plan
     def plan(self) -> List[Child]:
         py = [sys.executable, "-m", "src.firm"]
         mode_env = {"FIRM_MODE": self.mode}
         kids: List[Child] = [Child("money", py + ["zone", "money", "--mode", self.mode],
-                                   {**filtered_env(self.base_env, LLM_KEYS), **mode_env}, critical=True)]
-        brain_env = {**filtered_env(self.base_env, BROKER_KEYS), **mode_env}
+                                   {**filtered_env(self.base_env, LLM_KEYS + NOTIFY_KEYS), **mode_env}, critical=True)]
+        brain_env = {**filtered_env(self.base_env, BROKER_KEYS + NOTIFY_KEYS), **mode_env}
         mcp = self._mcp_child()
         if mcp is not None:
             kids.append(mcp)
@@ -80,8 +85,17 @@ class Supervisor:
         kids.append(Child("brain", py + ["zone", "brain", "--mode", self.mode], brain_env))
         if self.dashboard:
             kids.append(Child("api", py + ["zone", "api", "--host", self.host, "--port", str(self.port)],
-                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS, keep_api_token=True), **mode_env}))
+                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + NOTIFY_KEYS, keep_api_token=True),
+                               **mode_env}))
+        if self.notify_configured():
+            kids.append(Child("notify", py + ["zone", "notify"],
+                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS), **mode_env}))
         return kids
+
+    def notify_configured(self) -> bool:
+        e = self.base_env
+        return bool(e.get("NOTIFY_NTFY_URL") or (e.get("NOTIFY_TELEGRAM_BOT_TOKEN") and e.get("NOTIFY_TELEGRAM_CHAT_ID"))
+                    or e.get("HEALTHCHECK_PING_URL"))
 
     def _mcp_child(self) -> Optional[Child]:
         if self.base_env.get("FIRM_MCP", "1").strip().lower() in ("0", "false", "no", "off"):
@@ -141,6 +155,14 @@ class Supervisor:
     async def run(self) -> int:
         self.children = self.plan()
         logger.info("Starting zones: " + ", ".join(c.name for c in self.children))
+        # docker stop / systemd send SIGTERM: stop the zones in order instead of dying and orphaning them.
+        import signal
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, self._on_signal)
+            except (NotImplementedError, RuntimeError, ValueError):   # Windows / not main thread
+                pass
         watchers = [asyncio.create_task(self._watch(c)) for c in self.children]
         if self.dashboard and self.base_env.get("FIRM_OPEN_BROWSER", "1") != "0":
             from src.firm.api.launcher import open_when_ready
@@ -152,18 +174,27 @@ class Supervisor:
                     await self.stop()
                 await asyncio.sleep(1)
         except (asyncio.CancelledError, KeyboardInterrupt):
-            await self.stop()
+            pass
+        await self.stop()           # also waits for a stop that a signal handler started
         for w in watchers:          # watchers may sit in a restart back-off; the processes are already stopped
             w.cancel()
         await asyncio.gather(*watchers, return_exceptions=True)
         return 0
 
+    def _on_signal(self) -> None:
+        self.terminated = True
+        asyncio.ensure_future(self.stop())
+
     async def stop(self) -> None:
+        if self._stopped is None:
+            self._stopped = asyncio.Event()
         if self.stopping:
+            await self._stopped.wait()
             return
         self.stopping = True
-        # money last: it may still be flattening positions.
-        for c in sorted(self.children, key=lambda c: c.name == "money"):
+        # money last: it may still be flattening positions; notify after it, so the halt/flat message still goes out.
+        order = {"money": 1, "notify": 2}
+        for c in sorted(self.children, key=lambda c: order.get(c.name, 0)):
             if c.proc is not None and c.proc.returncode is None:
                 c.proc.terminate()
                 try:
@@ -172,3 +203,4 @@ class Supervisor:
                     logger.error(f"[{c.name}] did not stop in time - killing")
                     c.proc.kill()
         logger.info("All zones stopped.")
+        self._stopped.set()

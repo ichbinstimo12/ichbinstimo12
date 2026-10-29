@@ -136,3 +136,19 @@ def test_websocket_requires_valid_token(api):
         assert first["type"] == "SYNC"
         assert "data" in first
         assert "status" in first
+
+
+def test_deep_health_is_open_but_reports_503_until_zones_are_fresh(api):
+    client, store, _ = api
+    r = client.get("/health/deep")
+    assert r.status_code == 503 and r.json()["money"]["ok"] is False
+    assert "balance" not in r.text
+
+
+def test_websocket_rejects_foreign_origin(api):
+    client, _, _ = api
+    with client.websocket_connect(f"/ws/office?token={TOKEN}", headers={"origin": "https://evil.example"}) as ws:
+        with pytest.raises(Exception):
+            ws.receive_json()
+    with client.websocket_connect(f"/ws/office?token={TOKEN}", headers={"origin": "http://127.0.0.1:8000"}) as ws:
+        assert ws.receive_json()["type"]

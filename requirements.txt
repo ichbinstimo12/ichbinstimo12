@@ -9,6 +9,7 @@ pyyaml
 anthropic>=2.3      # LLM provider (only used with LLM_PROVIDER=anthropic)
 numpy               # research lab: learning model (logistic regression)
 pandas
+tzdata              # Zeitzonen (Sommerzeit) auch auf schlanken Servern/Windows
 mcp                 # MCP client for the agents' read-only Capital.com tools
 capitalcom-mcp==0.3.4  # Capital.com MCP server (github.com/SimonTarara62/capitalcom-mcp-server), pinned
 pytest

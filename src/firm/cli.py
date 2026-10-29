@@ -189,6 +189,8 @@ async def _run_zone(args) -> int:
         server = uvicorn.Server(uvicorn.Config(create_app(), host=args.host, port=args.port, log_level="info"))
         await server.serve()
         return 0
+    if args.name == "notify":
+        return await _run_notify()
     if HALT_FILE.exists():
         logger.error("Halt flag active - zone %s not started.", args.name)
         return 0
@@ -198,6 +200,72 @@ async def _run_zone(args) -> int:
         loop.add_signal_handler(signal.SIGTERM, lambda: setattr(orchestrator, "is_running", False))
     await orchestrator.start(mode=args.mode, zones=(args.name,))
     return 0
+
+
+async def _wait_while_halted(args) -> bool:
+    """Halt active: keep only the read-only dashboard (and phone notifications) up until the flag is removed.
+    Returns True when the operator ran `resume`, False on SIGTERM."""
+    import signal
+    logger.critical("HALT flag '%s' active - nothing trades. Waiting for: python -m src.firm resume", HALT_FILE)
+    stop = asyncio.Event()
+    with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+        loop = asyncio.get_running_loop()
+        loop.add_signal_handler(signal.SIGTERM, stop.set)
+        loop.add_signal_handler(signal.SIGINT, stop.set)
+    server = server_task = None
+    if args.dashboard:
+        import uvicorn
+        from src.firm.api.main import create_app
+        server = uvicorn.Server(uvicorn.Config(create_app(), host=args.host, port=args.port, log_level="warning"))
+        server_task = asyncio.create_task(server.serve())
+    try:
+        while HALT_FILE.exists() and not stop.is_set():
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=5)
+    finally:
+        if server is not None:
+            server.should_exit = True
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(server_task, timeout=10)
+    if stop.is_set():
+        return False
+    logger.info("Halt flag removed - starting the firm again.")
+    return True
+
+
+async def _run_notify() -> int:
+    """Notification zone: reads the event log, pushes to ntfy/Telegram, pings the dead-man's switch."""
+    import signal
+    from src.firm.bus.event_store import EventStore
+    from src.firm.ops.notify import Notifier
+    notifier = Notifier()
+    if not notifier.configured:
+        logger.info("No NOTIFY_*/HEALTHCHECK_PING_URL set - notification zone not started.")
+        return 0
+    stop = asyncio.Event()
+    with contextlib.suppress(NotImplementedError):
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
+    try:
+        await notifier.run(EventStore(os.getenv("FIRM_DB_PATH", "firm_events.db")), HALT_FILE, stop=stop)
+    finally:
+        await notifier.close()
+    return 0
+
+
+async def _notify_test() -> int:
+    from src.firm.ops.notify import Notifier
+    notifier = Notifier()
+    if not notifier.configured:
+        print("Keine Benachrichtigung konfiguriert. Setze NOTIFY_NTFY_URL oder NOTIFY_TELEGRAM_BOT_TOKEN + "
+              "NOTIFY_TELEGRAM_CHAT_ID (und optional HEALTHCHECK_PING_URL) in .env.")
+        return 1
+    try:
+        ok = await notifier.send("Test", "Benachrichtigungen der Trading-Firma funktionieren.", "default")
+        await notifier.ping(True)
+    finally:
+        await notifier.close()
+    print("Testnachricht gesendet." if ok else "Senden fehlgeschlagen - URL/Token pruefen (Details im Log).")
+    return 0 if ok else 1
 
 
 async def main():
@@ -210,13 +278,16 @@ async def main():
     run_parser.add_argument("--dashboard", action="store_true", help="Also serve the live office dashboard")
     run_parser.add_argument("--host", default="127.0.0.1", help="Dashboard bind host")
     run_parser.add_argument("--port", type=int, default=8000, help="Dashboard port")
+    run_parser.add_argument("--wait-on-halt", action="store_true",
+                            default=os.getenv("FIRM_WAIT_ON_HALT", "0") == "1",
+                            help="Bei Halt-Flag nicht beenden, sondern warten (Dashboard bleibt), bis 'resume' laeuft")
     run_parser.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch oeffnen")
     run_parser.add_argument("--single", action="store_true",
                             help="Alles in einem Prozess (ohne Prozesstrennung; z. B. zum Debuggen)")
 
     # 'zone' - one isolated process, started by the supervisor
     zone_parser = subparsers.add_parser("zone", help="(intern) eine isolierte Zone; startet der Supervisor")
-    zone_parser.add_argument("name", choices=["money", "brain", "api"])
+    zone_parser.add_argument("name", choices=["money", "brain", "api", "notify"])
     zone_parser.add_argument("--mode", default=os.getenv("FIRM_MODE", "PAPER"))
     zone_parser.add_argument("--host", default="127.0.0.1")
     zone_parser.add_argument("--port", type=int, default=8000)
@@ -225,6 +296,8 @@ async def main():
     eval_parser = subparsers.add_parser("eval", help="Agenten-Evals: feste Szenarien gegen das konfigurierte LLM (pass@k)")
     eval_parser.add_argument("--runs", type=int, default=3)
     eval_parser.add_argument("--scenario", default=None)
+
+    subparsers.add_parser("notify-test", help="Testnachricht an ntfy/Telegram senden und Healthcheck pingen")
 
     # 'halt' / 'resume'
     subparsers.add_parser("halt", help="Emergency halt of all operations (kill switch + stop)")
@@ -248,7 +321,7 @@ async def main():
 
     if args.command == "run":
         # A stale halt flag must stop the run before anything is initialised.
-        if HALT_FILE.exists():
+        if HALT_FILE.exists() and not args.wait_on_halt:
             logger.error(
                 "Halt flag '%s' is active. Resolve the incident, then run: python -m src.firm resume",
                 HALT_FILE,
@@ -265,13 +338,25 @@ async def main():
                 )
                 return 1
 
+        # Server (24/7): with a halt flag the firm waits - dashboard up, nothing trades - until you run `resume`.
+        if HALT_FILE.exists() and args.wait_on_halt:
+            if not await _wait_while_halted(args):
+                return 0
+
         if not args.single:
             from src.firm.supervisor import Supervisor
             logger.info(f"Starting firm in {args.mode} mode as separate processes (money / brain / mcp / api)...")
             sup = Supervisor(args.mode, args.dashboard, args.host, args.port, HALT_FILE)
             if args.no_browser:
                 sup.base_env["FIRM_OPEN_BROWSER"] = "0"
-            return await sup.run()
+            rc = await sup.run()
+            while args.wait_on_halt and HALT_FILE.exists() and not sup.terminated:
+                if not await _wait_while_halted(args):
+                    return rc
+                sup = Supervisor(args.mode, args.dashboard, args.host, args.port, HALT_FILE)
+                sup.base_env["FIRM_OPEN_BROWSER"] = "0"
+                rc = await sup.run()
+            return rc
 
         logger.info(f"Starting firm in {args.mode} mode (single process)...")
         orchestrator = FirmOrchestrator()
@@ -295,11 +380,21 @@ async def main():
                 from src.firm.api.launcher import open_when_ready
                 browser_task = asyncio.create_task(open_when_ready(args.host, args.port, os.getenv("FIRM_API_TOKEN", "")))
 
+        from src.firm.ops.notify import Notifier
+        notifier = Notifier()
+        notify_stop = asyncio.Event()
+        notify_task = (asyncio.create_task(notifier.run(orchestrator.event_store, HALT_FILE, stop=notify_stop))
+                       if notifier.configured else None)
         try:
             await orchestrator.start(mode=args.mode)
         except KeyboardInterrupt:
             logger.info("Shutting down via KeyboardInterrupt...")
         finally:
+            if notify_task is not None:
+                notify_stop.set()
+                with contextlib.suppress(asyncio.TimeoutError, Exception):
+                    await asyncio.wait_for(notify_task, timeout=20)
+            await notifier.close()
             if server is not None:
                 server.should_exit = True
             if server_task is not None:
@@ -338,6 +433,9 @@ async def main():
 
     elif args.command == "zone":
         return await _run_zone(args)
+
+    elif args.command == "notify-test":
+        return await _notify_test()
 
     elif args.command == "halt":
         HALT_FILE.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
