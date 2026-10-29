@@ -13,6 +13,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+DATA_MISSING = "Daten fehlen: "   # veto because a source was unreachable (retry soon), not because the token is bad
 SIGNALS = ("narrative", "volume_holders", "smart_money", "distribution", "structure")
 
 
@@ -45,7 +46,7 @@ def safety_veto(report: Optional[Dict[str, Any]], roundtrip_loss_pct: Optional[f
     """Leere Liste = gruenes Licht. Fehlende Daten = Veto (lieber keinen Trade als einen blinden)."""
     s, reasons = cfg["safety"], []
     if report is None:
-        return ["kein Sicherheitsbericht (RugCheck nicht erreichbar)"]
+        return [DATA_MISSING + "kein Sicherheitsbericht (RugCheck nicht erreichbar)"]
     if report.get("rugged"):
         reasons.append("als Rug markiert")
     if report.get("mint_authority"):
@@ -66,7 +67,7 @@ def safety_veto(report: Optional[Dict[str, Any]], roundtrip_loss_pct: Optional[f
         if level in s["block_risk_levels"]:
             reasons.append(f"RugCheck-Risiko: {name}")
     if roundtrip_loss_pct is None:
-        reasons.append("Verkaufs-Quote fehlt (moeglicher Honeypot)")
+        reasons.append(DATA_MISSING + "Kauf-/Verkaufs-Quote nicht verfuegbar - kein Trade ohne Honeypot-Test")
     elif roundtrip_loss_pct > s["max_roundtrip_loss_pct"]:
         reasons.append(f"Kauf+Verkauf kostet {roundtrip_loss_pct:.1f} % (Honeypot/zu illiquide)")
     if float(pair.get("liquidity_usd") or 0) < cfg["universe"]["min_liquidity_usd"]:

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from src.firm.bus.event_store import EventStore
@@ -23,6 +23,8 @@ ROOT_DIR = Path(__file__).resolve().parents[3]
 WEB_DIR = ROOT_DIR / "web"
 HALT_FILE = Path(os.getenv("FIRM_HALT_FILE", "firm.halt"))
 
+MEME_DIR = Path("data/memedesk")
+MEME_JOURNAL = Path("archiv/memedesk/journal.jsonl")
 DEFAULT_ORIGINS = "http://127.0.0.1:8000,http://localhost:8000"
 
 
@@ -419,6 +421,37 @@ def create_app(
         logger.critical("HALT requested via API.")
         await manager.broadcast({"type": "SYSTEM", "content": "KILL SWITCH activated via dashboard."})
         return {"status": "HALTED"}
+
+    # ---------------- Memecoin desk ----------------
+    @app.get("/api/memedesk", dependencies=[Depends(require_token)])
+    async def memedesk():
+        from src.firm.memedesk import report
+        from src.firm.memedesk.logic import load_limits
+        try:
+            limits = load_limits()
+        except Exception:
+            limits = None
+        return await asyncio.to_thread(report.build, store, MEME_DIR, MEME_JOURNAL, limits)
+
+    @app.post("/api/memedesk/kill", dependencies=[Depends(require_token)])
+    async def memedesk_kill():
+        MEME_DIR.mkdir(parents=True, exist_ok=True)
+        (MEME_DIR / "halt").write_text(datetime.utcnow().isoformat(), encoding="utf-8")
+        store.append("OPERATOR", "MEME_KILL_REQUESTED", {"source": "dashboard"})
+        logger.critical("Memecoin desk kill switch via dashboard.")
+        return {"status": "KILL_REQUESTED", "note": "Desk schliesst alle Positionen und stoppt. Wiederanlauf: firm meme resume"}
+
+    @app.post("/api/memedesk/mode", dependencies=[Depends(require_token)])
+    async def memedesk_mode(body: Dict[str, str]):
+        from src.firm.memedesk import live_gate
+        from src.firm.memedesk.logic import load_limits
+        mode = str((body or {}).get("mode") or "").upper()
+        if mode == "PAPER":
+            return {"mode": "PAPER", "granted": True}
+        ok, why = live_gate.check(MEME_JOURNAL, load_limits(), MEME_DIR / "state.json")
+        store.append("OPERATOR", "MEME_MODE_REQUEST", {"mode": mode, "granted": False, "reason": why,
+                                                      "source": "dashboard"})
+        return JSONResponse({"mode": "PAPER", "granted": False, "reason": why}, status_code=409)
 
     @app.post("/api/hire/{request_id}", dependencies=[Depends(require_token)])
     async def hire(request_id: str, decision: Dict[str, str]):

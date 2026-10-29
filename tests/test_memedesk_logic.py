@@ -28,7 +28,8 @@ def test_safety_vetoes_each_danger_alone():
         reasons = logic.safety_veto({**SAFE, **change}, 4.0, PAIR, CFG)
         assert any(word in r for r in reasons), (change, reasons)
     assert any("Honeypot" in r for r in logic.safety_veto(SAFE, 40.0, PAIR, CFG))
-    assert logic.safety_veto(None, 4.0, PAIR, CFG) == ["kein Sicherheitsbericht (RugCheck nicht erreichbar)"]
+    assert logic.safety_veto(SAFE, None, PAIR, CFG)[0].startswith(logic.DATA_MISSING)
+    assert logic.safety_veto(None, 4.0, PAIR, CFG)[0].startswith(logic.DATA_MISSING)
 
 
 def test_three_of_five_enters_and_two_does_not():

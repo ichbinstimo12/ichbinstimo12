@@ -152,3 +152,19 @@ def test_websocket_rejects_foreign_origin(api):
             ws.receive_json()
     with client.websocket_connect(f"/ws/office?token={TOKEN}", headers={"origin": "http://127.0.0.1:8000"}) as ws:
         assert ws.receive_json()["type"]
+
+
+def test_memedesk_endpoints_report_kill_and_refuse_live(api, tmp_path, monkeypatch):
+    import json as _json
+    client, store, _ = api
+    monkeypatch.setattr(api_module, "MEME_DIR", tmp_path / "md")
+    monkeypatch.setattr(api_module, "MEME_JOURNAL", tmp_path / "j.jsonl")
+    h = {"Authorization": f"Bearer {TOKEN}"}
+    assert client.get("/api/memedesk").status_code == 401
+    body = client.get("/api/memedesk", headers=h).json()
+    assert body["running"] is False and body["live_gate"]["trades"] == 0
+    assert client.post("/api/memedesk/kill", headers=h).json()["status"] == "KILL_REQUESTED"
+    assert (tmp_path / "md" / "halt").exists()
+    r = client.post("/api/memedesk/mode", headers=h, json={"mode": "LIVE"})
+    assert r.status_code == 409 and r.json()["granted"] is False and "100 Trades" in r.json()["reason"]
+    assert _json.loads(store.get_events(types=["MEME_MODE_REQUEST"])[-1]["payload_json"])["granted"] is False

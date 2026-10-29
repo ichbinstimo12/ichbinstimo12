@@ -54,6 +54,18 @@ async def paper_sell_value(sources, mint: str, tokens_raw: float, cfg: Dict[str,
     return {"sol": sol, "slippage_bps": bps, "impact_pct": q["impact_pct"], "route": q["route"]}
 
 
+def estimate_value(pos: Dict[str, Any], prices: Dict[str, Dict[str, float]], cfg: Dict[str, Any]) -> Optional[float]:
+    """Bewertung ohne Quote: Token-Menge x Preis (Jupiter-Preis-API), umgerechnet in SOL, minus geschaetzte
+    Ausstiegskosten (Slippage/Impact vom Einstieg, Swap-Gebuehr, Priority-Fee). None = kein Preis."""
+    p, s = prices.get(pos["mint"]), prices.get(SOL_MINT)
+    if not p or not s or not s.get("usd") or p.get("decimals") is None:
+        return None
+    tokens = float(pos["tokens_raw"]) / (10 ** int(p["decimals"]))
+    gross = tokens * p["usd"] / s["usd"]
+    cost = float(pos.get("exit_cost_pct") or 3.0) / 100 + cfg["execution"]["dex_fee_pct"] / 100
+    return max(0.0, gross * (1 - cost) - cfg["execution"]["priority_fee_sol"])
+
+
 class LiveExecutor:
     """Bewusst nicht implementiert - siehe Moduldoku und docs/memedesk.md (Freischaltung)."""
 

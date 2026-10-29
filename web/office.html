@@ -156,6 +156,16 @@
   ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-thumb { background: #1a2532; border-radius: 4px; }
   .halt-reason { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 5; max-width: 90%;
     background: #7f1d1d; color: #fff; border: 1px solid #fb7185; border-radius: 8px; padding: 6px 12px; font-weight: 600; }
+  .tabs { display: flex; gap: 6px; margin: 4px 0 10px; }
+  .tabs button { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 8px;
+    padding: 7px 14px; font-weight: 700; letter-spacing: .06em; cursor: pointer; }
+  .tabs button.on { border-color: var(--cyan); color: var(--cyan); }
+  .meme-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 10px 12px; }
+  .sig { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 2px; background: #2a3442; }
+  .sig.on { background: var(--emerald); }
+  .meme-row { display: grid; grid-template-columns: 70px 1fr; gap: 8px; padding: 5px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .meme-row b { font-weight: 700; }
+  .veto { color: var(--rose); } .ok { color: var(--emerald); }
 </style>
 </head>
 <body>
@@ -180,6 +190,12 @@
 
   <div class="alarms" id="alarms" role="alert" aria-live="polite"></div>
 
+  <nav class="tabs" role="tablist" aria-label="Bereiche">
+    <button role="tab" id="tab-firm" aria-selected="true" class="on">FIRMA</button>
+    <button role="tab" id="tab-meme" aria-selected="false">MEMECOIN DESK</button>
+  </nav>
+
+  <div id="view-firm">
   <div class="main">
     <section class="panel">
       <div class="panel-head"><h2>BÜRO</h2><span class="hint" id="floor-hint">Klick auf einen Roboter: Details</span></div>
@@ -253,6 +269,48 @@
       <div class="empty" style="padding:10px 12px">noch keine Trades archiviert</div>
     </div>
   </section>
+  </div>
+
+  <div id="view-meme" hidden>
+    <section class="panel">
+      <div class="panel-head"><h2>MEMECOIN DESK · SOLANA</h2>
+        <span class="hint" id="meme-hint">eigenes Kapital · keine Verbindung zum Firmenkonto · kein Gewinnversprechen</span></div>
+      <div class="meme-bar">
+        <span class="mode PAPER" id="meme-mode">PAPER</span>
+        <div class="metric"><span class="k">DESK-KAPITAL</span><span class="v" id="meme-equity">—</span></div>
+        <div class="metric"><span class="k">P/L HEUTE</span><span class="v" id="meme-today">—</span></div>
+        <div class="metric"><span class="k">P/L WOCHE (realisiert)</span><span class="v" id="meme-week">—</span></div>
+        <div class="metric"><span class="k">P/L GESAMT</span><span class="v" id="meme-total">—</span></div>
+        <div class="metric"><span class="k">TRADES</span><span class="v" id="meme-trades">—</span></div>
+        <div class="metric"><span class="k">STATUS</span><span class="v small" id="meme-status">—</span></div>
+        <button class="mini" id="meme-live" title="LIVE nur nach 4 Wochen / 100 PAPER-Trades mit positivem Ergebnis">LIVE ANFORDERN</button>
+        <button class="kill" id="meme-kill">■ DESK KILL SWITCH</button>
+      </div>
+    </section>
+    <div class="row2">
+      <section class="panel">
+        <div class="panel-head"><h2>POSITIONEN</h2><span class="hint">Werte in SOL (PAPER: simuliert mit echten Quotes)</span></div>
+        <div class="panel-body" id="meme-positions" style="max-height: 300px"><div class="empty">keine offenen Positionen</div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>WATCHLIST</h2><span class="hint">Score · 5 Signale (Narrativ, Volumen, Smart Money, Verteilung, Struktur) · Vetos</span></div>
+        <div class="panel-body" id="meme-watch" style="max-height: 300px"><div class="empty">Scout hat noch nichts gemeldet</div></div>
+      </section>
+    </div>
+    <div class="row2">
+      <section class="panel">
+        <div class="panel-head"><h2>ENTSCHEIDUNGEN DER AGENTEN</h2>
+          <div class="filters" id="meme-filters" role="toolbar" aria-label="Filter">
+            <button data-f="all" class="on">ALLE</button><button data-f="trade">TRADES</button>
+            <button data-f="veto">VETOS</button><button data-f="error">FEHLER</button></div></div>
+        <div class="panel-body" id="meme-log" style="max-height: 360px"><div class="empty">noch keine Entscheidungen</div></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>COACH &amp; FREISCHALTUNG</h2><span class="hint">nur Signal-Parameter, nie Risikoregeln</span></div>
+        <div class="panel-body" id="meme-coach" style="max-height: 360px"><div class="empty">—</div></div>
+      </section>
+    </div>
+  </div>
 </div>
 
 <div class="overlay" id="token-overlay">
@@ -930,6 +988,80 @@
   }
   function retry() { const d = backoff; backoff = Math.min(backoff * 1.7, 15000); setTimeout(connectWS, d); }
 
+  // =============================================================== memecoin desk tab
+  const SIG_NAMES = ["narrative", "volume_holders", "smart_money", "distribution", "structure"];
+  const sol = (v) => (v === null || v === undefined || !isFinite(Number(v))) ? "—" : Number(v).toFixed(4) + " SOL";
+  const signed = (v) => (v === null || v === undefined || !isFinite(Number(v))) ? "—" : (v > 0 ? "+" : "") + Number(v).toFixed(4) + " SOL";
+  state.memeFilter = "all";
+  async function refreshMeme() {
+    if ($("view-meme").hidden) return;
+    try { state.meme = await api("/api/memedesk"); } catch { return; }
+    const m = state.meme, st = m.state || {};
+    $("meme-mode").textContent = st.mode || "PAPER";
+    $("meme-equity").textContent = sol(st.equity_mark ?? st.equity);
+    for (const [id, v] of [["meme-today", m.pnl.today], ["meme-week", m.pnl.week_realized], ["meme-total", m.pnl.total]]) {
+      $(id).textContent = signed(v); $(id).className = "v" + (v > 0 ? " up" : v < 0 ? " down" : "");
+    }
+    $("meme-trades").textContent = String(m.trades_closed ?? 0);
+    $("meme-status").textContent = !m.running ? "nicht gestartet" : m.killed || st.halted ? "GESTOPPT: " + (st.halted || "Kill-Switch")
+      : st.paused_day ? "PAUSE (Tagesverlust)" : "aktiv";
+    $("meme-positions").innerHTML = (m.positions || []).map((p) => `<div class="meme-row"><b>${esc(p.symbol || p.mint.slice(0, 6))}</b>
+      <span>Einsatz ${sol(p.cost_sol)} · Wert ${sol(p.last_value)} · realisiert ${sol(p.realized_sol)}${p.free_ride ? " · FREE RIDE" : ""}
+      · seit ${Math.round((Date.now() / 1000 - p.opened_at) / 60)} min</span></div>`).join("") || '<div class="empty">keine offenen Positionen</div>';
+    $("meme-watch").innerHTML = (m.watchlist || []).map((w) => `<div class="meme-row"><b>${esc(w.symbol || w.mint.slice(0, 6))}</b>
+      <span>${(w.score * 100).toFixed(0)} · ${SIG_NAMES.map((k) => `<i class="sig ${w.signals && w.signals[k] ? "on" : ""}" title="${k}"></i>`).join("")}
+      ${w.count}/5 · ${w.vetoes && w.vetoes.length ? `<span class="veto">VETO: ${esc(short(w.vetoes.join("; "), 120))}</span>`
+        : w.chasing ? '<span class="veto">kein Hinterherrennen</span>' : `<span class="ok">${esc(short(w.structure, 60))}</span>`}</span></div>`).join("")
+      || '<div class="empty">Scout hat noch nichts gemeldet</div>';
+    const f = state.memeFilter;
+    const rows = (m.log || []).filter((e) => f === "all" || (f === "trade" && e.type.startsWith("MEME_TRADE"))
+      || (f === "veto" && (e.type === "MEME_VETO" || e.type === "MEME_LIMIT")) || (f === "error" && e.type === "MEME_ERROR"));
+    const logText = (e) => {
+      if (e.type === "MEME_SCAN") return `${e.seen} Tokens gesehen, ${e.checked} geprüft, ${e.passed_filter} im Filter` +
+        (Object.keys(e.rejected || {}).length ? " · aussortiert: " + Object.entries(e.rejected).map(([k, v]) => `${k} ${v}`).join(", ") : "");
+      if (e.type === "MEME_NARRATIVE") return `${e.symbol}: Narrativ-Score ${Math.round((e.score || 0) * 100)} (${(e.why || []).slice(0, 2).join("; ")})`;
+      const base = e.reason || (e.reasons || []).join("; ") || e.action || e.error || "";
+      return (e.symbol ? e.symbol + ": " : "") + base + (e.size_sol ? " · " + sol(e.size_sol) : "") +
+        (e.pnl_pct !== undefined && e.pnl_pct !== null ? ` · ${e.pnl_pct > 0 ? "+" : ""}${e.pnl_pct} %` : "");
+    };
+    $("meme-log").innerHTML = rows.slice(0, 80).map((e) => `<div class="meme-row"><span>${esc(timeOf(e.ts))}</span><span>
+      <b>${esc(e.agent)}</b> ${esc(e.type.replace("MEME_", ""))}: ${esc(short(logText(e), 220))}</span></div>`).join("")
+      || '<div class="empty">noch keine Entscheidungen</div>';
+    const g = m.live_gate || {};
+    $("meme-coach").innerHTML = `<div class="meme-row"><b>LIVE</b><span>${g.trades || 0}/100 Trades · ${g.days || 0}/28 Tage ·
+      PAPER-Ergebnis ${signed(g.pnl_sol)} · LIVE-Executor noch nicht gebaut</span></div>` + ((m.coach || []).map((c) =>
+      `<div class="meme-row"><b>v${c.version}</b><span>${esc(Object.entries(c.diff || {}).map(([k, v]) => `${k}: ${v[0]} → ${v[1]}`).join(", "))}
+      · Backtest ${c.backtest ? Number(c.backtest.baseline_avg_pct).toFixed(1) + " % → " + Number(c.backtest.new_avg_pct).toFixed(1) + " %" : ""}</span></div>`).join("")
+      || '<div class="empty">Coach hat noch keine Anpassung (braucht mind. 30 abgeschlossene Trades)</div>');
+  }
+  function showTab(name) {
+    $("view-firm").hidden = name !== "firm"; $("view-meme").hidden = name !== "meme";
+    $("tab-firm").classList.toggle("on", name === "firm"); $("tab-meme").classList.toggle("on", name === "meme");
+    $("tab-firm").setAttribute("aria-selected", String(name === "firm")); $("tab-meme").setAttribute("aria-selected", String(name === "meme"));
+    try { sessionStorage.setItem("firm_tab", name); } catch {}
+    if (name === "meme") refreshMeme();
+  }
+  $("tab-firm").addEventListener("click", () => showTab("firm"));
+  $("tab-meme").addEventListener("click", () => showTab("meme"));
+  $("meme-filters").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-f]"); if (!b) return;
+    state.memeFilter = b.dataset.f; $("meme-filters").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); refreshMeme();
+  });
+  $("meme-kill").addEventListener("click", async () => {
+    if (!confirm("MEMECOIN-DESK STOPPEN?\n\nAlle Memecoin-Positionen werden verkauft und der Desk hält an.\nDie übrige Firma läuft weiter.\nWiederanlauf: firm meme resume")) return;
+    try { await post("/api/memedesk/kill"); toast("Memecoin-Desk: Kill-Switch ausgelöst"); refreshMeme(); }
+    catch (e) { toast("Fehlgeschlagen: " + e.message); }
+  });
+  $("meme-live").addEventListener("click", async () => {
+    if (!confirm("LIVE-Modus anfordern? Es wird geprüft, ob die PAPER-Kriterien erfüllt sind.")) return;
+    try {
+      const res = await fetch("/api/memedesk/mode", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "LIVE" }) });
+      const body = await res.json(); toast(body.granted ? "LIVE freigeschaltet" : "LIVE nicht freigeschaltet: " + (body.reason || res.status));
+    } catch (e) { toast("Fehlgeschlagen: " + e.message); }
+  });
+  setInterval(refreshMeme, 10000);
+
   // =============================================================== controls / boot
   $("kill").addEventListener("click", async () => {
     if (!confirm("KILL SWITCH AUSLÖSEN?\n\nAlle Positionen werden glattgestellt und die Firma hält an.\nNeustart nur über: python -m src.firm resume")) return;
@@ -955,6 +1087,7 @@
   window.addEventListener("resize", resize);
   resize();
   loadAll().then(() => { known = new Set(state.agents.map((a) => a.name)); });
+  try { if (sessionStorage.getItem("firm_tab") === "meme") showTab("meme"); } catch {}   // after the token is known
   connectWS();
   requestAnimationFrame(draw);
   setInterval(refreshStatus, 10000);

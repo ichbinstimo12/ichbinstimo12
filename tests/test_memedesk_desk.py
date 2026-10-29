@@ -48,6 +48,11 @@ class FakeSources:
     async def candles(self, pool, minutes=5, limit=48):
         return breakout()
 
+    async def prices(self, mints):
+        out = {m: {"usd": 100.0 * self.value_mult, "decimals": 6} for m in mints}
+        out["So11111111111111111111111111111111111111112"] = {"usd": 100.0, "decimals": 9}
+        return out
+
     async def quote(self, i, o, amount, slippage_bps=300):
         if i.startswith("So111"):                       # buy: 1 SOL -> 1e6 token units
             return {"in": amount, "out": int(amount / 1e9 * 1_000_000), "impact_pct": 1.0, "route": ["Pump.fun Amm"]}
@@ -113,3 +118,48 @@ def test_state_survives_restart(tmp_path):
     d2 = MemeDesk(src, store, cfg=logic.load_config(), limits=logic.load_limits(), data_dir=tmp_path / "md",
                   journal_dir=tmp_path / "j", wallets=[], now_fn=lambda: now[0])
     assert "GOOD" in d2.state["positions"] and d2.state["equity"] < 10
+
+
+def test_rate_limited_sale_is_retried_not_lost(tmp_path):
+    now, src = [NOW], FakeSources()
+    d, store = desk(tmp_path, src, now)
+    asyncio.run(d.scan())
+    src.value_mult = 0.5
+    real_quote = src.quote
+
+    async def limited(*a, **k):
+        raise RuntimeError("jupiter: rate limited, pausing 15s")
+    src.quote = limited
+    now[0] += 60
+    asyncio.run(d.manage())
+    assert "GOOD" in d.state["positions"]                      # stop decided, sale postponed, position kept
+    assert any("verschoben" in e["error"] for e in types(store, "MEME_ERROR"))
+    src.quote = real_quote
+    now[0] += 5
+    asyncio.run(d.manage())
+    assert "GOOD" not in d.state["positions"] and types(store, "MEME_TRADE_CLOSE")[0]["reason"].startswith("harter Stop")
+
+
+def test_429_pauses_the_host(tmp_path):
+    import httpx
+    from src.firm.memedesk.sources import MemeSources
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(429, headers={"Retry-After": "30"})
+    clock = [1000.0]
+    s = MemeSources({"sources": {}}, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)), env={},
+                    now_fn=lambda: clock[0])
+    for _ in range(3):
+        try:
+            asyncio.run(s.prices(["M"]))
+        except Exception:
+            pass
+    assert len(calls) == 1                                    # no hammering while blocked
+    clock[0] += 31
+    try:
+        asyncio.run(s.prices(["M"]))
+    except Exception:
+        pass
+    assert len(calls) == 2

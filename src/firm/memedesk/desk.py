@@ -46,6 +46,7 @@ class MemeDesk:
         self.state = self._load_state()
         self.watchlist: Dict[str, Dict[str, Any]] = {}
         self._safety_cache: Dict[str, Any] = {}
+        self._candle_cache: Dict[str, Any] = {}
         self._veto_until: Dict[str, float] = {}
         self._holders: Dict[str, List[tuple]] = {}
         self._wallet_cursor: Dict[str, str] = {}
@@ -124,7 +125,7 @@ class MemeDesk:
             return []
         u, loop = self.cfg["universe"], self.cfg["loop"]
         tokens = await self.src.trending_tokens()
-        prelim = []
+        prelim, rejected = [], {}
         for tok in tokens[: int(loop["max_candidates"])]:
             mint = tok["mint"]
             if mint in self.state["positions"] or self._veto_until.get(mint, 0) > self.now():
@@ -150,10 +151,15 @@ class MemeDesk:
             self._recent_names = (self._recent_names + [name])[-300:]
             if reject:
                 self._veto_until[mint] = self.now() + VETO_TTL
+                key = reject.split(" ")[0] if not reject.startswith("DEX") else "DEX"
+                rejected[key] = rejected.get(key, 0) + 1
                 continue
             narrative, why = logic.narrative_score(tok, pair, self._recent_names, now_ms=self.now() * 1000)
             prelim.append((narrative, tok, pair, why))
         prelim.sort(key=lambda r: r[0], reverse=True)
+        self.log("SCOUT", "MEME_SCAN", {"seen": len(tokens), "checked": min(len(tokens), int(loop["max_candidates"])),
+                                        "passed_filter": len(prelim), "rejected": rejected,
+                                        "deep_checks": min(len(prelim), int(loop.get("deep_checks", 6)))})
         decisions = []
         for narrative, tok, pair, why in prelim[: int(loop.get("deep_checks", 6))]:
             decisions.append(await self._deep_check(tok, pair, narrative, why))
@@ -173,7 +179,8 @@ class MemeDesk:
             loss, _ = await self.src.roundtrip_loss_pct(mint, 0.1)
         except Exception:
             loss = None
-        self._safety_cache[mint] = (self.now() + SAFETY_TTL, report, loss)
+        ttl = SAFETY_TTL if report is not None and loss is not None else 30    # missing data: retry soon
+        self._safety_cache[mint] = (self.now() + ttl, report, loss)
         return report, loss
 
     async def _deep_check(self, tok, pair, narrative, narrative_why) -> Dict[str, Any]:
@@ -186,10 +193,15 @@ class MemeDesk:
             hist.append((self.now(), holders))
             del hist[:-20]
         growth = (hist[-1][1] / hist[0][1] - 1) if len(hist) >= 2 and hist[0][1] else None
-        try:
-            candles = await self.src.candles(pair["pair"], 5, 48)
-        except Exception:
-            candles = []
+        cached = self._candle_cache.get(pair["pair"])
+        if cached and cached[0] > self.now():
+            candles = cached[1]
+        else:
+            try:
+                candles = await self.src.candles(pair["pair"], 5, 48)
+                self._candle_cache[pair["pair"]] = (self.now() + 60, candles)
+            except Exception:
+                candles = []
         ev = logic.evaluate_signals(pair, vetoes, report, narrative, growth, self.smart_buyers(mint), candles, self.cfg)
         entry = {"mint": mint, "symbol": pair.get("symbol"), "dex": pair.get("dex"), "score": ev["score"],
                  "signals": ev["signals"], "count": ev["count"], "vetoes": vetoes, "chasing": ev["chasing"],
@@ -199,7 +211,8 @@ class MemeDesk:
         self.log("NARRATIVE", "MEME_NARRATIVE", {"mint": mint, "symbol": pair.get("symbol"), "score": narrative,
                                                  "why": narrative_why[:4]})
         if vetoes:
-            self._veto_until[mint] = self.now() + VETO_TTL
+            if not all(v.startswith(logic.DATA_MISSING) for v in vetoes):
+                self._veto_until[mint] = self.now() + VETO_TTL     # real safety problem: leave it alone a while
             self.log("SAFETY", "MEME_VETO", {"mint": mint, "symbol": pair.get("symbol"), "reasons": vetoes})
             return {**entry, "decision": "veto_safety"}
         if not ev["enter"]:
@@ -230,6 +243,7 @@ class MemeDesk:
             "tokens_raw": fill["tokens_raw"], "opened_at": t, "peak_value": fill["cost_sol"], "free_ride": False,
             "tiers_done": [], "realized_sol": 0.0, "last_move_at": t, "last_move_value": fill["cost_sol"],
             "creator_balance": (report or {}).get("creator_balance"), "liquidity_at_entry": pair.get("liquidity_usd"),
+            "exit_cost_pct": round(fill["slippage_bps"] / 200 + float(fill["impact_pct"] or 0), 3),
             "metrics": ev["metrics"], "signals": ev["signals"], "structure_ok": ev["signals"]["structure"],
             "distribution_ok": ev["signals"]["distribution"], "holders_up": ev["signals"]["volume_holders"],
         }
@@ -248,21 +262,32 @@ class MemeDesk:
         closed = []
         killed = self._killed()
         marked = float(self.state["equity"])
+        mints = list(self.state["positions"])
+        try:
+            prices = await self.src.prices(mints + [paper.SOL_MINT]) if mints else {}
+        except Exception as e:
+            prices = {}
+            self.log("EXECUTOR", "MEME_ERROR", {"error": f"Preise: {str(e)[:150]}"})
         for mint, pos in list(self.state["positions"].items()):
-            try:
-                val = await paper.paper_sell_value(self.src, mint, pos["tokens_raw"], self.cfg)
-            except Exception as e:
-                self.log("EXECUTOR", "MEME_ERROR", {"mint": mint, "error": f"Bewertung: {str(e)[:150]}"})
+            value = paper.estimate_value(pos, prices, self.cfg)
+            if value is None:       # no price: keep the last value, retry next cycle (and say so)
+                self.log("EXECUTOR", "MEME_ERROR", {"mint": mint, "error": "kein Preis fuer Bewertung"})
                 marked += float(pos.get("last_value") or pos["cost_sol"])
                 continue
-            value = val["sol"]
             pos["last_value"] = value
             paper.mark(pos, value, self.now(), self.cfg["exits"]["time_stop_band_pct"])
             alerts = ["Kill-Switch"] if killed else await self._alerts(mint, pos)
             dec = paper.exit_decision(pos, value, self.now(), self.cfg, self.limits, alerts)
             if dec:
                 reason, frac = dec
-                sold = value * frac
+                try:      # the real (paper) sale uses a Jupiter quote for exactly this amount
+                    fill = await paper.paper_sell_value(self.src, mint, float(pos["tokens_raw"]) * frac, self.cfg)
+                    sold = fill["sol"]
+                except Exception as e:
+                    self.log("EXECUTOR", "MEME_ERROR", {"mint": mint, "error": f"Verkauf ({reason}) verschoben: "
+                                                                               f"{str(e)[:150]}"})
+                    marked += value
+                    continue
                 done = paper.apply_exit(pos, reason, frac, sold)
                 self.state["equity"] = round(float(self.state["equity"]) + sold, 9)
                 kind = "MEME_TRADE_CLOSE" if done else "MEME_TRADE_PARTIAL"
@@ -280,7 +305,7 @@ class MemeDesk:
                     self.state["closed_trades"] = int(self.state.get("closed_trades") or 0) + 1
                     closed.append(row)
                     continue
-                value -= sold
+                value *= (1 - frac)
             marked += value
         self.state["equity_mark"] = round(marked, 9)
         event = logic.update_limits(self.state, self.limits, _today(self.now()))
@@ -340,25 +365,35 @@ class MemeDesk:
                                                "halted", "closed_trades", "created")} | {
             "positions": list(self.state["positions"].values()), "wallets_tracked": len(self.wallets)}
 
-    async def run(self, is_running=lambda: True) -> None:
-        loop = self.cfg["loop"]
-        last_scan = last_wallets = 0.0
-        logger.info(f"Memecoin desk started ({self.state['mode']}, {self.state['equity']:.3f} SOL, "
-                    f"{len(self.wallets)} wallets).")
+    async def _every(self, name: str, seconds: float, fn, is_running) -> None:
         while is_running():
-            t = self.now()
             try:
-                if self.wallets and t - last_wallets >= 30:
-                    last_wallets = t
-                    await self.track_wallets()
-                if t - last_scan >= float(loop["scan_seconds"]):
-                    last_scan = t
-                    await self.scan()
-                if self.state["positions"]:
-                    await self.manage()
+                await fn()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"memedesk loop error: {e}")
-                self.log("DESK", "MEME_ERROR", {"error": str(e)[:300]})
-            await asyncio.sleep(float(loop["manage_seconds"]))
+                logger.error(f"memedesk {name} error: {e}")
+                self.log("DESK", "MEME_ERROR", {"loop": name, "error": str(e)[:300]})
+            await asyncio.sleep(seconds)
+
+    async def run(self, is_running=lambda: True) -> None:
+        """Scout, Positionsverwaltung und Wallet-Tracker laufen parallel: eine lange Scan-Runde (Rate-Limits der
+        Datenquellen) verzoegert nie die Stop-Pruefung offener Positionen."""
+        loop = self.cfg["loop"]
+        logger.info(f"Memecoin desk started ({self.state['mode']}, {self.state['equity']:.3f} SOL, "
+                    f"{len(self.wallets)} wallets).")
+
+        async def manage_if_open():
+            if self.state["positions"] or self._killed():
+                await self.manage()
+        tasks = [asyncio.create_task(self._every("scout", float(loop["scan_seconds"]), self.scan, is_running)),
+                 asyncio.create_task(self._every("manage", float(loop["manage_seconds"]), manage_if_open, is_running))]
+        if self.wallets:
+            tasks.append(asyncio.create_task(self._every("wallets", 30.0, self.track_wallets, is_running)))
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self.save()

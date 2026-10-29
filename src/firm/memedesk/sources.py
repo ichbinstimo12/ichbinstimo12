@@ -24,7 +24,8 @@ logger = logging.getLogger("MemeSources")
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
 LAMPORTS = 1_000_000_000
-MIN_INTERVAL = {"dexscreener": 0.25, "rugcheck": 1.0, "jupiter": 1.1, "gecko": 2.2, "rpc": 0.15, "x": 1.0}
+MIN_INTERVAL = {"dexscreener": 0.25, "rugcheck": 1.0, "jupiter": 1.5, "gecko": 2.5, "rpc": 0.15, "x": 1.0}
+COOLDOWN_429 = 15.0           # seconds a host is left alone after "429 Too Many Requests" (or Retry-After)
 
 
 def _f(v) -> Optional[float]:
@@ -45,12 +46,17 @@ class MemeSources:
         self.now = now_fn
         self._last: Dict[str, float] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
+        self._blocked: Dict[str, float] = {}
+        self._list_cache: Dict[str, Any] = {}
         self.errors: Dict[str, int] = {}
 
     # ------------------------------------------------------------------ plumbing
     async def _get(self, host: str, url: str, **kw) -> Any:
         lock = self._locks.setdefault(host, asyncio.Lock())
         async with lock:
+            blocked = self._blocked.get(host, 0) - self.now()
+            if blocked > 0:
+                raise RuntimeError(f"{host}: rate limited, pausing {blocked:.0f}s")
             wait = MIN_INTERVAL.get(host, 0.5) - (self.now() - self._last.get(host, -1e9))
             if wait > 0:
                 await asyncio.sleep(wait)
@@ -60,6 +66,9 @@ class MemeSources:
                     r = await self.client.post(url, **kw)
                 else:
                     r = await self.client.get(url, **kw)
+                if r.status_code == 429:
+                    retry = r.headers.get("Retry-After", "")
+                    self._blocked[host] = self.now() + (float(retry) if retry.isdigit() else COOLDOWN_429)
                 r.raise_for_status()
                 return r.json()
             except Exception:
@@ -87,6 +96,25 @@ class MemeSources:
                 t["boost"] = max(t["boost"], float(r.get("totalAmount") or r.get("amount") or 0))
                 t["links"] = [str(l.get("type") or l.get("label") or "") for l in (r.get("links") or [])][:6]
                 t["description"] = str(r.get("description") or "")[:300]
+        gbase = self.cfg.get("geckoterminal", "https://api.geckoterminal.com/api/v2")
+        for path, kind in (("/networks/solana/trending_pools", "gecko_trending"), ("/networks/solana/new_pools", "gecko_new")):
+            cached = self._list_cache.get(path)
+            if cached and cached[0] > self.now():
+                d = cached[1]                 # GeckoTerminal free tier: ~30 requests/min, lists change slowly
+            else:
+                try:
+                    d = await self._get("gecko", gbase + path)
+                    self._list_cache[path] = (self.now() + 90, d)
+                except Exception as e:
+                    logger.warning(f"geckoterminal {path}: {type(e).__name__}")
+                    continue
+            for pool in (d or {}).get("data") or []:
+                tid = (((pool.get("relationships") or {}).get("base_token") or {}).get("data") or {}).get("id") or ""
+                mint = tid.split("_", 1)[1] if tid.startswith("solana_") else ""
+                if not mint or mint == SOL_MINT:
+                    continue
+                t = out.setdefault(mint, {"mint": mint, "sources": [], "boost": 0.0, "links": [], "description": ""})
+                t["sources"].append(kind)
         return list(out.values())
 
     async def pair(self, mint: str) -> Optional[Dict[str, Any]]:
@@ -153,15 +181,16 @@ class MemeSources:
         back = sell["out"] / LAMPORTS
         return round((1 - back / sol) * 100, 3), {"buy": buy, "sell": sell}
 
-    async def prices(self, mints: List[str]) -> Dict[str, float]:
+    async def prices(self, mints: List[str]) -> Dict[str, Dict[str, float]]:
+        """USD-Preis und Dezimalstellen je Mint (ein Aufruf fuer bis zu 50 Mints)."""
         base = self.cfg.get("jupiter", "https://lite-api.jup.ag")
-        out: Dict[str, float] = {}
+        out: Dict[str, Dict[str, float]] = {}
         for i in range(0, len(mints), 50):
             d = await self._get("jupiter", f"{base}/price/v3", params={"ids": ",".join(mints[i:i + 50])})
             for m, v in (d or {}).items():
                 p = _f((v or {}).get("usdPrice"))
                 if p:
-                    out[m] = p
+                    out[m] = {"usd": p, "decimals": int((v or {}).get("decimals") or 0)}
         return out
 
     # ------------------------------------------------------------------ GeckoTerminal

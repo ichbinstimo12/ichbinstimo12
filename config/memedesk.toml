@@ -5,7 +5,7 @@
 [loop]
 scan_seconds = 20               # Scout: neue/trendende Tokens
 manage_seconds = 5              # offene Positionen pruefen (Exits)
-max_candidates = 25             # so viele Tokens je Runde grob pruefen (DexScreener)
+max_candidates = 40             # so viele Tokens je Runde grob pruefen (DexScreener)
 deep_checks = 6                 # davon die besten tief pruefen (RugCheck, Honeypot-Quote, Kerzen)
 
 [universe]
