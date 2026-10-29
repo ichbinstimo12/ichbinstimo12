@@ -90,9 +90,13 @@ async def test_execution_max_positions(risk_gate, event_store):
 
 
 @pytest.mark.asyncio
-async def test_live_mode_requires_approval_token(risk_gate, event_store, tmp_path):
+async def test_live_mode_requires_approval_token(risk_gate, event_store, tmp_path, monkeypatch):
     import json
     import time
+    from src.firm.money.live_approval import issue
+    env = {"CAPITAL_LIVE_API_KEY": "lk", "CAPITAL_LIVE_PASSWORD": "lp", "CAPITAL_LIVE_IDENTIFIER": "me@x"}
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
 
     token_path = tmp_path / "live_token.json"
     gateway = ExecutionGateway(
@@ -107,16 +111,38 @@ async def test_live_mode_requires_approval_token(risk_gate, event_store, tmp_pat
     assert blocked["status"] == "REJECTED"
     assert "Live approval token" in blocked["reason"]
 
-    # A valid, unexpired token unlocks live execution
+    # An unsigned token (e.g. written by another process) does not unlock anything
     token_path.write_text(json.dumps({"expires_at": time.time() + 60}), encoding="utf-8")
+    forged = await gateway.execute(TradeProposal(epic="BTCUSD", side="BUY", size=0.005, stop_loss=99.0,
+                                                 reason="forged"), 200.0, 0, current_price=100.0)
+    assert forged["status"] == "REJECTED"
+
+    # A valid, signed, unexpired token unlocks live execution
+    token_path.write_text(json.dumps(issue(60, env, risk_gate.limits_path)), encoding="utf-8")
     allowed = await gateway.execute(proposal, 200.0, 0, current_price=100.0)
     assert allowed["status"] == "FILLED"
 
-    # An expired token blocks again
-    token_path.write_text(json.dumps({"expires_at": time.time() - 1}), encoding="utf-8")
+    # An expired token blocks again (signed, but in the past)
+    token_path.write_text(json.dumps(issue(60, env, risk_gate.limits_path, now=time.time() - 120)), encoding="utf-8")
     proposal2 = TradeProposal(
         epic="BTCUSD", side="BUY", size=0.005, stop_loss=99.0, reason="Live test 2"
     )
     expired = await gateway.execute(proposal2, 200.0, 0, current_price=100.0)
     assert expired["status"] == "REJECTED"
     assert "Live approval token" in expired["reason"]
+
+
+
+def test_live_token_bound_to_limits_and_account_and_tamper_proof(tmp_path):
+    import time
+    from src.firm.money.live_approval import issue, verify
+    limits = tmp_path / "limits.toml"
+    limits.write_text("[trade]\nmax_risk_per_trade = 0.005\n")
+    env = {"CAPITAL_LIVE_API_KEY": "lk", "CAPITAL_LIVE_PASSWORD": "lp", "CAPITAL_LIVE_IDENTIFIER": "me@x"}
+    tok = issue(3600, env, limits)
+    assert verify(tok, env, limits)[0]
+    assert not verify(dict(tok, expires_at=time.time() + 10**9), env, limits)[0]      # tampered
+    assert not verify(tok, dict(env, CAPITAL_LIVE_IDENTIFIER="other@x"), limits)[0]   # other account
+    assert not verify(tok, {}, limits)[0]                                             # brain zone: no keys
+    limits.write_text("[trade]\nmax_risk_per_trade = 0.02\n")
+    assert "Limits" in verify(tok, env, limits)[1]                                    # limits changed

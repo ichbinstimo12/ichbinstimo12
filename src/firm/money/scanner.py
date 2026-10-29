@@ -77,6 +77,7 @@ class MarketScanner:
         self.session_fn = session_fn
         self.universe: List[str] = list(self.whitelist)
         self.queue: List[str] = []
+        self._budget = 0.0
         self._last_boundary = 0.0
         self._last_universe = 0.0
         self._seen_hits: set = set()
@@ -91,6 +92,14 @@ class MarketScanner:
         except Exception as e:
             markets = []
             logger.warning(f"Market list unavailable: {e}")
+        if not markets:
+            # Keep the current universe and retry in 5 minutes instead of shrinking to the whitelist for hours.
+            self._last_universe = self.now() - self.universe_hours * 3600 + 300
+            self.stats["errors"] += 1
+            self.event_store.append("SCANNER", "UNIVERSE_UPDATED", {
+                "markets_total": 0, "whitelist": self.whitelist, "candidates": None, "resolution": self.resolution,
+                "note": "Marktliste nicht verfuegbar - bisheriges Universum bleibt, neuer Versuch in 5 min"})
+            return
         picked = pick_universe(markets, self.whitelist, self.universe_size, self.max_spread_pct)
         self.universe = self.whitelist + [p["epic"] for p in picked]
         if self.stream is not None:
@@ -111,9 +120,9 @@ class MarketScanner:
         if boundary > self._last_boundary and now - boundary >= SETTLE_SECONDS:
             self._last_boundary = boundary
             self.queue = [e for e in self.universe if e not in self.queue] + self.queue
-        for _ in range(max(1, int(self.rps))):
-            if not self.queue:
-                break
+        self._budget = min(self._budget + self.rps, max(self.rps, 1.0))   # token bucket: rps < 1 works too
+        while self.queue and self._budget >= 1.0:
+            self._budget -= 1.0
             epic = self.queue.pop(0)
             try:
                 await self.scan_epic(epic)
@@ -125,10 +134,15 @@ class MarketScanner:
         candles = await self.broker.get_candles(epic, resolution=self.resolution, limit=200)
         now = self.now()
         cs = [c for c in lab.normalize(candles) if c["ts"] + self.bar <= now + 1]   # nur geschlossene Kerzen
+        if not cs:
+            self.stats["errors"] += 1                        # broker returned nothing: not a healthy scan
+            return []
         self.stats["scans"] += 1
         self.stats["last_scan"] = now
         if len(cs) < 40:
             return []
+        if now - (cs[-1]["ts"] + self.bar) > 2 * self.bar:
+            return []                                        # market closed / stale data: no "fresh" signals
         session = self.session_fn(epic)
         ind = lab.Ind(cs)
         i = ind.n - 1
@@ -164,8 +178,9 @@ class MarketScanner:
         stage = ctx.get("stage")
         if stage == self._smc_stage.get(epic):
             return
+        had_setup = self._smc_stage.get(epic) is not None
         self._smc_stage[epic] = stage
-        if stage is None:
+        if stage is None and not had_setup:
             return
         self.event_store.append("SCANNER", "SMC_SETUP", {
             "epic": epic, "stage": stage, "side": ctx.get("side"), "bar_ts": bar_ts,

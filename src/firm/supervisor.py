@@ -183,7 +183,7 @@ class Supervisor:
 
     def _on_signal(self) -> None:
         self.terminated = True
-        asyncio.ensure_future(self.stop())
+        self._signal_stop = asyncio.ensure_future(self.stop())     # keep a reference (exceptions stay visible)
 
     async def stop(self) -> None:
         if self._stopped is None:
@@ -192,15 +192,37 @@ class Supervisor:
             await self._stopped.wait()
             return
         self.stopping = True
-        # money last: it may still be flattening positions; notify after it, so the halt/flat message still goes out.
-        order = {"money": 1, "notify": 2}
-        for c in sorted(self.children, key=lambda c: order.get(c.name, 0)):
-            if c.proc is not None and c.proc.returncode is None:
+        try:
+            # money last: it may still be flattening positions; notify after it, so the halt/flat message still goes out.
+            order = {"money": 1, "notify": 2}
+            others = [c for c in self.children if order.get(c.name, 0) == 0]
+            for c in others:                                   # signal all non-critical zones at once
+                self._terminate(c)
+            await asyncio.gather(*(self._wait(c, 10) for c in others))
+            for c in sorted((c for c in self.children if c.name in order), key=lambda c: order[c.name]):
+                self._terminate(c)
+                await self._wait(c, 60 if c.name == "money" else 10)
+        finally:
+            logger.info("All zones stopped.")
+            self._stopped.set()
+
+    @staticmethod
+    def _terminate(c: Child) -> None:
+        if c.proc is not None and c.proc.returncode is None:
+            try:
                 c.proc.terminate()
-                try:
-                    await asyncio.wait_for(c.proc.wait(), timeout=60 if c.name == "money" else 10)
-                except asyncio.TimeoutError:
-                    logger.error(f"[{c.name}] did not stop in time - killing")
-                    c.proc.kill()
-        logger.info("All zones stopped.")
-        self._stopped.set()
+            except ProcessLookupError:
+                pass
+
+    @staticmethod
+    async def _wait(c: Child, timeout: float) -> None:
+        if c.proc is None or c.proc.returncode is not None:
+            return
+        try:
+            await asyncio.wait_for(c.proc.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.error(f"[{c.name}] did not stop in time - killing")
+            try:
+                c.proc.kill()
+            except ProcessLookupError:
+                pass

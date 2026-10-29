@@ -252,7 +252,7 @@ def create_app(
 
     ALERT_TYPES = ["TRADING_HALTED", "STRATEGY_STOPPED", "STRATEGY_WARNING", "BROKER_OFFLINE", "DESK_IDLE",
                    "RESEARCH_FAILED", "AGENT_INVALID", "LESSON_CONFLICT", "STREAM_DISCONNECTED", "FLAG",
-                   "INJECTION_SUSPECTED", "CIRCUIT_BREAKER", "KILL_SWITCH", "BACKUP_FAILED", "LIMITS_WARNING"]
+                   "INJECTION_SUSPECTED", "CIRCUIT_BREAKER", "KILL_SWITCH", "BACKUP_FAILED", "LIMITS_WARNING", "TASK_DIED", "NEWS_DEGRADED"]
 
     def alerts_payload() -> List[Dict[str, Any]]:
         """Alarm-Leiste: die letzten Warnungen der letzten 24 Stunden (echte Events)."""

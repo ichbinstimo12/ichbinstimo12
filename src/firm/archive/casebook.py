@@ -84,18 +84,28 @@ class Casebook:
             "reason": sp.get("reason"), "r": p.get("r"), "pnl": p.get("pnl"), "exact": p.get("exact"),
             "session": session_bucket(t_fill) if t_fill else None,
             "weekday": datetime.fromtimestamp(t_fill, timezone.utc).strftime("%a") if t_fill else None,
-            "smc_stage": _p(smc).get("stage") if smc else None,
+            # SMC stage only describes smc_tjr trades (an ORB trade near an old sweep is not an "SMC case")
+            "smc_stage": (_p(smc).get("stage") if smc and (p.get("strategy") or sp.get("strategy")) == "smc_tjr"
+                          else None),
             "news_before": news[-3:], "news_nearby": bool(news), "high_impact_nearby": events,
         }
 
     def sync(self) -> List[Dict[str, Any]]:
-        """Neue Faelle fuer noch nicht erfasste TRADE_RESULTs anlegen (idempotent)."""
-        done = self._journaled()
+        """Neue Faelle fuer noch nicht erfasste TRADE_RESULTs anlegen (idempotent, inkrementell)."""
+        if not hasattr(self, "_done"):
+            self._done = self._journaled()
+            self._cursor: Optional[str] = None
         new = []
-        for res in self.store.get_events(types=["TRADE_RESULT"]):
-            if res["id"] in done:
+        for res in self.store.get_events(types=["TRADE_RESULT"], after_ts=self._cursor):
+            self._cursor = res["ts"]
+            if res["id"] in self._done:
                 continue
-            case = self.build_case(res)
+            self._done.add(res["id"])
+            try:
+                case = self.build_case(res)
+            except Exception as e:                   # one odd result must not block all later cases
+                logger.error(f"case for {res['id']} not built: {e}")
+                continue
             self.store.append("ARCHIVIST", "JOURNAL_ENTRY", case, correlation_id=res["id"])
             try:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -117,7 +127,8 @@ def patterns(cases: List[Dict[str, Any]], min_n: int = 5) -> List[Dict[str, Any]
     """Gruppen mit mind. min_n Faellen (mit R): Anzahl, Trefferquote, Schnitt-R, Belege. Sortiert nach |Schnitt-R|."""
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for c in cases:
-        if not isinstance(c.get("r"), (int, float)):
+        # inexact R (another position was open, P&L from balance difference) is no evidence
+        if not isinstance(c.get("r"), (int, float)) or c.get("exact") is False:
             continue
         for d in DIMENSIONS:
             if c.get(d) is not None:

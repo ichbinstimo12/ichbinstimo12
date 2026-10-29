@@ -52,7 +52,10 @@ class KillSwitch:
                 # If token expired, re-authenticate
                 if "401" in str(e):
                     logger.info("Session expired during kill. Re-authenticating...")
-                    await self.broker.authenticate()
+                    try:
+                        await self.broker.authenticate()
+                    except Exception as auth_error:       # keep retrying; never abort the kill
+                        logger.error(f"Re-authentication during kill failed: {auth_error}")
 
                 await asyncio.sleep(2)
 

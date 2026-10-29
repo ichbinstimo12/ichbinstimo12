@@ -238,20 +238,20 @@ class FirmOrchestrator:
         except Exception as e:
             logger.warning(f"Archive backfill skipped: {e}")
 
+        sup = self._supervised
         self._background_tasks += [
-            asyncio.create_task(self.reconciler.run(on_mismatch=self.handle_mismatch)),
-            asyncio.create_task(self.research_loop()),
-            asyncio.create_task(self.report_loop()),
-            asyncio.create_task(self.account_snapshot_loop()),
-            asyncio.create_task(self.archive_loop()),
+            sup("reconciler", lambda: self.reconciler.run(on_mismatch=self.handle_mismatch)),
+            sup("research_loop", self.research_loop),
+            sup("report_loop", self.report_loop),
+            sup("account_snapshot_loop", self.account_snapshot_loop),
+            sup("archive_loop", self.archive_loop),
         ]
         if self.trading_desk is not None:
-            self._background_tasks.append(asyncio.create_task(self.trading_loop()))
+            self._background_tasks.append(sup("trading_loop", self.trading_loop))
         if self.stream is not None:
-            self._background_tasks.append(asyncio.create_task(self.stream.run()))
+            self._background_tasks.append(sup("price_stream", self.stream.run))
         if self.scanner is not None:
-            self._background_tasks.append(asyncio.create_task(
-                self.scanner.run(float(os.getenv("FIRM_SCAN_SECONDS", "1")))))
+            self._background_tasks.append(sup("scanner", lambda: self.scanner.run(float(os.getenv("FIRM_SCAN_SECONDS", "1")))))
 
     async def _start_brain(self):
         # 4. Load role configs (Brain-Zone staffing) + agents hired earlier with operator approval
@@ -287,14 +287,39 @@ class FirmOrchestrator:
         if os.getenv("FIRM_NEWS", "1").strip().lower() not in ("0", "false", "no", "off"):
             from src.firm.data.news import NewsWire
             self.news = NewsWire(self.event_store)
-            self._background_tasks.append(asyncio.create_task(self.news.run(lambda: self.is_running)))
-        self._background_tasks.append(asyncio.create_task(self.casebook_loop()))
+            self._background_tasks.append(self._supervised("news_wire", lambda: self.news.run(lambda: self.is_running)))
         self._background_tasks += [
-            asyncio.create_task(self.llm_heartbeat_loop()),
-            asyncio.create_task(self.scheduler_loop()),
-            asyncio.create_task(self.agent_loop()),
-            asyncio.create_task(self.hiring_loop()),
+            self._supervised("casebook_loop", self.casebook_loop),
+            self._supervised("llm_heartbeat_loop", self.llm_heartbeat_loop),
+            self._supervised("scheduler_loop", self.scheduler_loop),
+            self._supervised("agent_loop", self.agent_loop),
+            self._supervised("hiring_loop", self.hiring_loop),
         ]
+
+    def _supervised(self, name: str, factory) -> asyncio.Task:
+        """Background loop that never dies silently: an exception (or an unexpected return) is logged, written as
+        TASK_DIED (dashboard + phone) and the loop restarts with growing back-off. Cancellation = normal stop."""
+        async def runner():
+            backoff = 5.0
+            while self.is_running:
+                try:
+                    await factory()
+                    if not self.is_running:
+                        return
+                    error = "returned unexpectedly"
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    error = f"{type(e).__name__}: {str(e)[:300]}"
+                logger.critical(f"Background task {name} died ({error}) - restarting in {backoff:.0f}s")
+                try:
+                    self.event_store.append("SYSTEM", "TASK_DIED", {"task": name, "error": error,
+                                                                    "restart_in_s": backoff})
+                except Exception:
+                    pass
+                await asyncio.sleep(backoff)
+                backoff = min(300.0, backoff * 2)
+        return asyncio.create_task(runner(), name=name)
 
     async def _run_until_halt(self):
         logger.info(f"Firm is now LIVE (Mode: {self.current_mode}, zones: {', '.join(sorted(self.zones))}).")
@@ -745,19 +770,22 @@ class FirmOrchestrator:
         last_activity = loop.time()
         while self.is_running:
             cycle += 1
-            # Idle watchdog: say loudly (event -> CEO -> dashboard) why nothing has traded for hours.
-            fills = self.event_store.get_events(types=["ORDER_FILLED"], last=1)
-            if fills and fills[-1]["ts"] != getattr(self, "_last_fill_seen", None):
-                self._last_fill_seen = fills[-1]["ts"]
-                last_activity = loop.time()
-            if loop.time() - last_activity > idle_hours * 3600:
-                self.event_store.append("TRADING_DESK", "DESK_IDLE", {
-                    "hours_without_entry": idle_hours,
-                    "why_no_entry": (self.trading_desk.last_summary or {}).get("reasons"),
-                    "error": (self.trading_desk.last_summary or {}).get("error"),
-                    "research": self.gate.overview().get("verdicts"),
-                })
-                last_activity = loop.time()
+            try:
+                # Idle watchdog: say loudly (event -> CEO -> dashboard) why nothing has traded for hours.
+                fills = self.event_store.get_events(types=["ORDER_FILLED"], last=1)
+                if fills and fills[-1]["ts"] != getattr(self, "_last_fill_seen", None):
+                    self._last_fill_seen = fills[-1]["ts"]
+                    last_activity = loop.time()
+                if loop.time() - last_activity > idle_hours * 3600:
+                    self.event_store.append("TRADING_DESK", "DESK_IDLE", {
+                        "hours_without_entry": idle_hours,
+                        "why_no_entry": (self.trading_desk.last_summary or {}).get("reasons"),
+                        "error": (self.trading_desk.last_summary or {}).get("error"),
+                        "research": self.gate.overview().get("verdicts"),
+                    })
+                    last_activity = loop.time()
+            except Exception as e:
+                logger.error(f"Idle watchdog error: {e}")
             try:
                 summary = await asyncio.wait_for(self.trading_desk.run_cycle(), timeout=timeout)
                 if summary.get("trades"):
@@ -780,7 +808,7 @@ class FirmOrchestrator:
     def _desk_resolutions(self) -> set:
         res = {self.trading_desk.resolution} if self.trading_desk is not None else set()
         for v in (self.gate.overview().get("verdicts") or {}).values():
-            if v.get("resolution"):
+            if isinstance(v, dict) and v.get("resolution"):
                 res.add(v["resolution"])
         return {r for r in res if r in RES_SECONDS}
 
@@ -789,7 +817,12 @@ class FirmOrchestrator:
         at the latest after `max_interval` seconds. Checked every second."""
         now = time.time()
         wake = now + max_interval
-        for r in self._desk_resolutions():
+        try:
+            resolutions = self._desk_resolutions()
+        except Exception as e:
+            logger.error(f"Desk timeframes unavailable ({e}); waking every {max_interval:.0f}s")
+            resolutions = set()
+        for r in resolutions:
             bar = RES_SECONDS[r]
             wake = min(wake, (now // bar + 1) * bar + 2.0)
         while self.is_running and time.time() < wake:
@@ -841,8 +874,13 @@ class FirmOrchestrator:
             await self.broker.close()
 
     async def _kill(self, reason: str) -> None:
-        """Kill switch + audit event (flat confirmed by the broker or not)."""
-        flat = await self.kill_switch.activate() if self.kill_switch else None
+        """Kill switch + audit event (flat confirmed by the broker or not). Never raises: a failing kill must still
+        be recorded and still stop the zone."""
+        flat = None
+        try:
+            flat = await self.kill_switch.activate() if self.kill_switch else None
+        except Exception as e:
+            logger.critical(f"KILL-SWITCH raised: {e}")
         try:
             self.event_store.append("KILL_SWITCH", "KILL_SWITCH", {"reason": reason, "flat": flat})
         except Exception as e:
@@ -850,5 +888,7 @@ class FirmOrchestrator:
 
     async def handle_mismatch(self):
         logger.critical("RECONCILER MISMATCH DETECTED! Triggering KillSwitch...")
-        await self._kill("reconciler mismatch")
-        self.is_running = False
+        try:
+            await self._kill("reconciler mismatch")
+        finally:
+            self.is_running = False

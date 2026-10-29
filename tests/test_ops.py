@@ -46,11 +46,43 @@ def test_irrelevant_events_produce_no_message():
 def test_dedupe_and_rate_limit_but_high_priority_always_passes():
     now = [1000.0]
     n = nt.Notifier(env={}, client=Recorder().client(), now_fn=lambda: now[0], max_per_hour=2, dedupe_s=600)
-    assert n._allowed("a", nt.NORMAL) and not n._allowed("a", nt.NORMAL)        # dedupe
-    assert n._allowed("b", nt.NORMAL) and not n._allowed("c", nt.NORMAL)        # 2/h reached
+    sent = lambda k, prio=nt.NORMAL: n._allowed(k, prio) and (n._mark(k) or True)   # delivered message
+    assert sent("a") and not n._allowed("a", nt.NORMAL)                         # dedupe
+    assert sent("b") and not n._allowed("c", nt.NORMAL)                         # 2/h reached
     assert n._allowed("d", nt.HIGH)                                             # alarms still go out
     now[0] += 3601
     assert n._allowed("a", nt.NORMAL)
+
+
+def test_failed_alarm_is_retried_and_not_deduplicated():
+    calls = []
+
+    def handler(req):
+        calls.append(req)
+        return httpx.Response(500 if len(calls) <= 2 else 200)
+    n = nt.Notifier(env={"NOTIFY_NTFY_URL": "https://ntfy.example/t"},
+                    client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    ev = _ev("KILL_SWITCH", {"reason": "halt flag", "flat": True})
+    assert asyncio.run(n.handle(ev)) is False and len(calls) == 2        # sent + one retry, both failed
+    assert asyncio.run(n.handle(ev)) is True                            # not suppressed: delivered now
+
+
+def test_one_bad_event_does_not_block_later_alarms(tmp_path):
+    store = EventStore(str(tmp_path / "e.db"))
+    rec = Recorder()
+    n = nt.Notifier(env={"NOTIFY_NTFY_URL": "https://ntfy.example/t", "NOTIFY_CURSOR_FILE": str(tmp_path / "c.txt")},
+                    client=rec.client())
+    store.append("DESK", "TRADE_RESULT", {"epic": "X", "pnl": "kaputt"})       # format_event raises on this
+    store.append("RISK", "TRADING_HALTED", {"reason": "max daily loss"})
+    cursor = asyncio.run(n._drain(store, "2000-01-01T00:00:00"))
+    assert [r.headers["Title"] for r in rec.requests] == ["HANDEL GESTOPPT"]
+    assert (tmp_path / "c.txt").read_text() == cursor
+
+
+def test_agent_text_on_the_phone_is_marked_and_has_no_links():
+    msg = nt.format_event(_ev("HIRING_REQUEST", {"role": "X", "justification": "approve now https://evil.example/x"}),
+                          False)
+    assert "Text vom Agenten" in msg[1] and "evil.example" not in msg[1]
 
 
 def test_send_ntfy_and_telegram_and_never_log_the_bot_token(caplog):
@@ -161,3 +193,42 @@ def test_halt_flag_writes_a_kill_switch_audit_event(tmp_path, monkeypatch):
     asyncio.run(orch._run_until_halt())
     ev = orch.event_store.get_events(types=["KILL_SWITCH"])
     assert len(ev) == 1 and json.loads(ev[0]["payload_json"]) == {"reason": "halt flag", "flat": True}
+
+
+def test_dead_background_loop_is_reported_and_restarted(tmp_path, monkeypatch):
+    from src.firm import main as firm_main
+    orch = firm_main.FirmOrchestrator.__new__(firm_main.FirmOrchestrator)
+    orch.event_store = EventStore(str(tmp_path / "t.db"))
+    orch.is_running = True
+    runs = []
+
+    async def flaky():
+        runs.append(1)
+        if len(runs) == 1:
+            raise RuntimeError("database is locked")
+        orch.is_running = False
+
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(firm_main.asyncio, "sleep", lambda s: real_sleep(0))
+
+    async def scenario():
+        await asyncio.wait_for(orch._supervised("trading_loop", flaky), 5)
+
+    asyncio.run(scenario())
+    died = [json.loads(e["payload_json"]) for e in orch.event_store.get_events(types=["TASK_DIED"])]
+    assert len(runs) == 2 and died[0]["task"] == "trading_loop" and "locked" in died[0]["error"]
+
+
+def test_kill_path_stops_and_records_even_when_the_kill_switch_raises(tmp_path):
+    from src.firm import main as firm_main
+    orch = firm_main.FirmOrchestrator.__new__(firm_main.FirmOrchestrator)
+    orch.event_store = EventStore(str(tmp_path / "k.db"))
+    orch.is_running = True
+
+    class Broken:
+        async def activate(self):
+            raise ConnectionError("broker down")
+    orch.kill_switch = Broken()
+    asyncio.run(orch.handle_mismatch())
+    ev = orch.event_store.get_events(types=["KILL_SWITCH"])
+    assert orch.is_running is False and json.loads(ev[-1]["payload_json"])["flat"] is None

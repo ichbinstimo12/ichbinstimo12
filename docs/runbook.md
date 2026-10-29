@@ -265,20 +265,25 @@ Nur mit gültigem, nicht abgelaufenem Token (`live_token.json`). Ohne Token
 lehnt das ExecutionGateway jeden Live-Order ab. Limits in `config/limits.toml`
 bleiben unverändert und sind für Agenten read-only.
 
-## 6. Docker
+## 6. Docker / 24/7-Server
 
-```bash
-# FIRM_API_TOKEN in .env setzen (Pflicht bei 0.0.0.0-Bind)
-docker compose up --build
-```
-
-Ein Prozess (`run --dashboard --host 0.0.0.0`), Healthcheck auf `/health`,
-`restart: unless-stopped`.
+Schritt-für-Schritt: **docs/deploy_vps.md**. Kurz: `./scripts/firmctl.sh start | status | logs | halt | resume |
+update | notify-test`. Der Container läuft als Nicht-root, startet nach Absturz/Neustart selbst, Healthcheck auf
+`/health/deep` (503 bei Halt oder eingefrorener Zone). Nach einem Halt wartet die Firma (Dashboard bleibt
+erreichbar) und startet nach `resume` von selbst wieder. Benachrichtigungen aufs Handy über ntfy/Telegram.
 
 ## 7. Störungsfälle
 
-- **LLM fällt aus:** Agent-Runtime fällt auf deterministischen Gedanken-Fallback
-  zurück (kein Crash-Loop).
+- **Firma steht still:** Dashboard zeigt oben rot den Halt-Grund (Text des Halt-Flags); `firm status` ebenso.
+  Typische Gründe: Tagesverlust-/Drawdown-Grenze, Kill-Switch, Reconciler-Abweichung (eine Position beim Broker,
+  die die Firma nicht kennt, z. B. manuell eröffnet), Handelszone 5x in 10 min abgestürzt.
+- **Konto gewechselt** (Demo zurückgesetzt, Demo → Live): Höchststand und Tagesstart werden automatisch neu auf
+  das erkannte Konto gesetzt (Ereignis ACCOUNT_BOUND), statt einen falschen Drawdown zu melden.
+- **LLM fällt aus:** Kopfzeile „KI GETRENNT", Ereignis LLM_STATUS, Handy-Meldung. Agenten pausieren, der Handel
+  läuft deterministisch weiter; sobald das LLM zurück ist, arbeiten die Agenten von selbst weiter.
+- **Limits widersprüchlich:** Ereignis LIMITS_WARNING beim Start und in `firm doctor` (z. B. Tagesverlust-Grenze
+  kleiner als das Risiko je Trade).
+- **Nachrichtenquelle sperrt/fällt aus:** Quelle wird mit wachsender Pause übersprungen; der Rest läuft weiter.
 - **Broker down:** Mock-Fallback / Reconciler-Alarm → Kill-Switch prüfen.
 - **Absturz mitten in einem Task:** beim nächsten Start via `requeue_stale()`
   wieder aufgenommen.

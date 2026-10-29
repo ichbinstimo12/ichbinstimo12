@@ -15,8 +15,9 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,6 +35,12 @@ def _p(e) -> Dict[str, Any]:
         return json.loads(e.get("payload_json") or "{}")
     except (TypeError, ValueError):
         return {}
+
+
+def _agent_text(v, n: int = 160) -> str:
+    """Agent-written text: no links, no control characters (a manipulated agent must not phish the operator)."""
+    t = re.sub(r"https?://\S+|www\.\S+", "[Link entfernt]", str(v or ""))
+    return re.sub(r"[\x00-\x1f\x7f]", " ", t)[:n]
 
 
 def _num(v, fmt="{:+.2f}") -> str:
@@ -95,17 +102,24 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
         return "Tagesbericht", f"{p.get('date')}: {p.get('fills')} Fills, {p.get('closed_trades')} geschlossen", LOW, \
             f"daily:{p.get('date')}"
     if t == "HIRING_REQUEST":
-        return "Freigabe noetig: Einstellung", f"{p.get('role')}: {str(p.get('justification'))[:200]}", NORMAL, \
-            f"hire:{p.get('request_id')}"
+        return "Freigabe noetig: Einstellung", f"{p.get('role')} [Text vom Agenten, im Dashboard pruefen]: " \
+            f"{_agent_text(p.get('justification'))}", NORMAL, f"hire:{p.get('request_id')}"
     if t == "PLAYBOOK_PROPOSED":
-        return "Freigabe noetig: Playbook", f"{p.get('role')}: {str(p.get('reason'))[:200]}", NORMAL, f"pb:{p.get('id')}"
+        return "Freigabe noetig: Playbook", f"{p.get('role')} [Text vom Agenten, im Dashboard pruefen]: " \
+            f"{_agent_text(p.get('reason'))}", NORMAL, f"pb:{p.get('id')}"
+    if t == "TASK_DIED":
+        return "Hintergrundprozess abgestuerzt", f"{p.get('task')}: {str(p.get('error'))[:200]} - Neustart in " \
+            f"{p.get('restart_in_s')} s", HIGH, f"died:{p.get('task')}"
+    if t == "NEWS_DEGRADED":
+        return "Wirtschaftskalender fehlt", f"{str(p.get('reason'))[:200]} - News-Sperre vor Terminen inaktiv", \
+            NORMAL, "news_degraded"
     if t == "PROMOTION_CHECK" and p.get("ready"):
         return "Skalierungs-Leiter: Kriterien erfuellt", \
             f"{p.get('stage')} -> {p.get('next')} waere begruendet. Entscheidung liegt bei dir.", NORMAL, "promo"
     return None
 
 
-NOTIFY_TYPES = ["ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
+NOTIFY_TYPES = ["ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
                 "BROKER_OFFLINE", "RESEARCH_FAILED", "BACKUP_FAILED", "INJECTION_SUSPECTED", "STREAM_DISCONNECTED",
                 "DESK_IDLE", "RESEARCH_DONE", "DAILY_REPORT", "HIRING_REQUEST", "PLAYBOOK_PROPOSED", "PROMOTION_CHECK"]
 
@@ -121,6 +135,8 @@ class Notifier:
         self.client = client or httpx.AsyncClient(timeout=15)
         self.now, self.max_per_hour, self.dedupe_s = now_fn, max_per_hour, dedupe_s
         self._sent: List[float] = []
+        cf = e.get("NOTIFY_CURSOR_FILE", "data/notify_cursor.txt") if env is None else e.get("NOTIFY_CURSOR_FILE")
+        self.cursor_file: Optional[Path] = Path(cf) if cf else None
         self._last_key: Dict[str, float] = {}
 
     @property
@@ -134,9 +150,13 @@ class Notifier:
             return False
         if len(self._sent) >= self.max_per_hour and priority != HIGH:
             return False
+        return True
+
+    def _mark(self, key: str) -> None:
+        """Only a delivered message counts for dedupe/rate limit (a failed alarm is retried)."""
+        now = self.now()
         self._last_key[key] = now
         self._sent.append(now)
-        return True
 
     async def send(self, title: str, text: str, priority: str = NORMAL) -> bool:
         ok = False
@@ -147,6 +167,8 @@ class Notifier:
             try:
                 r = await self.client.post(self.ntfy_url, content=text.encode("utf-8"), headers=headers)
                 ok = ok or r.status_code < 300
+                if r.status_code >= 300:
+                    logger.warning(f"ntfy rejected the message: HTTP {r.status_code}")
             except Exception as ex:
                 logger.warning(f"ntfy failed: {type(ex).__name__}")
         if self.tg_token and self.tg_chat:
@@ -155,6 +177,8 @@ class Notifier:
                                            json={"chat_id": self.tg_chat, "text": f"{title}\n{text}",
                                                  "disable_notification": priority == LOW})
                 ok = ok or r.status_code < 300
+                if r.status_code >= 300:
+                    logger.warning(f"telegram rejected the message: HTTP {r.status_code}")
             except Exception as ex:
                 logger.warning(f"telegram failed: {type(ex).__name__}")   # never log the URL (contains the token)
         return ok
@@ -166,7 +190,13 @@ class Notifier:
         title, text, prio, key = msg
         if not self._allowed(key, prio):
             return False
-        return await self.send(title, text, prio)
+        ok = await self.send(title, text, prio)
+        if not ok and prio == HIGH:
+            await asyncio.sleep(2)
+            ok = await self.send(title, text, prio)      # alarms get a second attempt
+        if ok:
+            self._mark(key)
+        return ok
 
     async def ping(self, healthy: bool) -> None:
         if not self.hc_url:
@@ -178,9 +208,34 @@ class Notifier:
 
     async def _drain(self, event_store, cursor: str) -> str:
         for e in event_store.get_events(after_ts=cursor, types=NOTIFY_TYPES):
-            cursor = e["ts"]
-            await self.handle(e)
+            cursor = e["ts"]                       # always advance: one bad event must not block later alarms
+            try:
+                await self.handle(e)
+            except Exception as ex:
+                logger.error(f"notification for {e.get('type')} failed: {type(ex).__name__}: {ex}")
+        self._save_cursor(cursor)
         return cursor
+
+    def _load_cursor(self) -> str:
+        """Continue after the last notified event (events during a restart of this zone are not lost);
+        at most one hour back."""
+        floor = (datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None).isoformat()
+        try:
+            saved = self.cursor_file.read_text(encoding="utf-8").strip() if self.cursor_file else ""
+        except OSError:
+            saved = ""
+        if saved:
+            return max(saved, floor)
+        return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+    def _save_cursor(self, cursor: str) -> None:
+        if not self.cursor_file:
+            return
+        try:
+            self.cursor_file.parent.mkdir(parents=True, exist_ok=True)
+            self.cursor_file.write_text(cursor, encoding="utf-8")
+        except OSError as ex:
+            logger.warning(f"notify cursor not saved: {ex}")
 
     async def run(self, event_store, halt_file: Path, poll_s: float = 15, ping_s: float = 300,
                   stop: Optional[asyncio.Event] = None) -> None:
@@ -188,7 +243,7 @@ class Notifier:
         Beim Stoppen werden die letzten Events noch gemeldet (z. B. Halt + Glattstellung)."""
         from src.firm.ops.health import zone_health
         stop = stop or asyncio.Event()
-        cursor = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        cursor = self._load_cursor()
         last_ping = -1e12
         chat = bool(self.ntfy_url or (self.tg_token and self.tg_chat))
         if chat:

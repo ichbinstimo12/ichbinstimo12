@@ -14,6 +14,10 @@ from src.firm.main import FirmOrchestrator, HALT_FILE, env_secret
 
 load_env()
 logging.basicConfig(level=logging.INFO, format='%(name)s - %(levelname)s - %(message)s')
+# httpx logs every request URL at INFO; Telegram bot tokens, the secret ntfy topic and healthcheck UUIDs are part
+# of those URLs. Secrets never go to the logs.
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger("FirmCLI")
 
 LIVE_TOKEN_FILE = Path(os.getenv("FIRM_LIVE_TOKEN_FILE", "live_token.json"))
@@ -53,11 +57,11 @@ def _live_token_state() -> str:
     if not LIVE_TOKEN_FILE.exists():
         return "none"
     try:
+        from src.firm.money.live_approval import verify
         data = json.loads(LIVE_TOKEN_FILE.read_text(encoding="utf-8"))
+        ok, why = verify(data, os.environ, "config/limits.toml")
         remaining = float(data.get("expires_at", 0)) - time.time()
-        if remaining > 0:
-            return f"VALID ({remaining / 60:.0f} min left)"
-        return "EXPIRED"
+        return f"VALID ({remaining / 60:.0f} min left)" if ok else f"INVALID ({why})"
     except Exception:
         return "INVALID"
 
@@ -217,7 +221,8 @@ async def _run_zone(args) -> int:
 
 
 async def _wait_while_halted(args) -> bool:
-    """Halt active: keep only the read-only dashboard (and phone notifications) up until the flag is removed.
+    """Halt active: keep only the read-only dashboard up until the flag is removed (the halt message itself was
+    already pushed by the notify zone before it stopped; the dead-man's switch reports the halted state).
     Returns True when the operator ran `resume`, False on SIGTERM."""
     import signal
     logger.critical("HALT flag '%s' active - nothing trades. Waiting for: python -m src.firm resume", HALT_FILE)
@@ -241,6 +246,10 @@ async def _wait_while_halted(args) -> bool:
             server.should_exit = True
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(server_task, timeout=10)
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            loop = asyncio.get_running_loop()           # hand SIGTERM back to whatever runs next
+            loop.remove_signal_handler(signal.SIGTERM)
+            loop.remove_signal_handler(signal.SIGINT)
     if stop.is_set():
         return False
     logger.info("Halt flag removed - starting the firm again.")
@@ -470,13 +479,12 @@ async def main():
         return await _doctor()
 
     elif args.command == "approve-live":
-        expires_at = time.time() + args.duration
-        token = {
-            "created_at": datetime.utcnow().isoformat(),
-            "expires_at": expires_at,
-            "duration_seconds": args.duration,
-            "account_hint": (env_secret("CAPITAL_IDENTIFIER") or "not-configured")[:60],
-        }
+        from src.firm.money.live_approval import issue
+        try:
+            token = issue(args.duration, os.environ, "config/limits.toml")
+        except RuntimeError as e:
+            logger.error(str(e))
+            return 1
         LIVE_TOKEN_FILE.write_text(json.dumps(token, indent=2), encoding="utf-8")
         logger.warning(f"LIVE approval token written to {LIVE_TOKEN_FILE} for {args.duration}s. Use only with --mode LIVE_MICRO/LIVE.")
 

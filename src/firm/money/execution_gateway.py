@@ -54,9 +54,13 @@ class ExecutionGateway:
         if not path.exists():
             return False
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return float(data.get("expires_at", 0)) > time.time()
-        except Exception:
+            from src.firm.money.live_approval import verify
+            ok, why = verify(json.loads(path.read_text(encoding="utf-8")), os.environ, self.risk_gate.limits_path)
+            if not ok:
+                logger.critical(f"Live approval token rejected: {why}")
+            return ok
+        except Exception as e:
+            logger.critical(f"Live approval token unreadable: {e}")
             return False
 
     async def execute(self, proposal: TradeProposal, account_balance: float, current_positions: int,

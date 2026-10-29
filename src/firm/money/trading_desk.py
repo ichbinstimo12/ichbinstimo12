@@ -236,7 +236,8 @@ class DeskState:
         try:
             if self.path.exists():
                 self.data = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            logger.critical(f"Desk state {self.path} unreadable ({e}) - peak/day start start fresh from the broker")
             self.data = {}
 
     def _save(self) -> None:
@@ -247,12 +248,19 @@ class DeskState:
         except Exception as e:
             logger.warning(f"Could not persist desk state: {e}")
 
-    def bind_account(self, key: str) -> Optional[str]:
+    def bind_account(self, key: str, equity: Optional[float] = None) -> Optional[str]:
         """Peak and day start belong to ONE account in ONE mode. A different account (demo reset, demo -> live,
         other sub-account) must not inherit them: a demo peak of 1000 against a live balance of 200 would read as
-        an 80 % drawdown and halt the firm on its first cycle. Returns the previous key when it changed."""
+        an 80 % drawdown and halt the firm on its first cycle. Returns the previous key when it changed.
+        State written before this binding existed (no key yet) is kept when it plausibly belongs to this account
+        (equity at least half of the stored peak), so an already-taken loss is not forgiven by an update."""
         previous = self.data.get("account_key")
         if previous == key:
+            return None
+        peak = float(self.data.get("peak_balance") or 0.0)
+        if previous is None and peak > 0 and equity is not None and equity >= 0.5 * peak:
+            self.data["account_key"] = key
+            self._save()
             return None
         for k in ("day", "day_start_balance", "peak_balance"):
             self.data.pop(k, None)
@@ -367,7 +375,7 @@ class TradingDesk:
             if not ev:
                 return None
             p = json.loads(ev[-1]["payload_json"] or "{}")
-            if not hasattr(self, "_news_ccy"):
+            if not getattr(self, "_news_ccy", None):          # an empty/failed read is retried, never cached
                 from src.firm.data.news import load_config
                 self._news_ccy = load_config().get("currencies") or {}
             from src.firm.data.news import blackout_for
@@ -641,7 +649,7 @@ class TradingDesk:
             return summary
 
         account_key = f"{self.mode}:{account.get('account_id') or '-'}:{account.get('currency') or '-'}"
-        previous_key = self.state.bind_account(account_key)
+        previous_key = self.state.bind_account(account_key, equity)
         if previous_key is not None:
             self.event_store.append("TRADING_DESK", "ACCOUNT_BOUND", {
                 "account": account_key, "previous": previous_key,

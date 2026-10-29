@@ -560,3 +560,17 @@ async def test_no_entry_right_before_a_high_impact_release(desk_env):
         "blackout_before_min": 15, "blackout_after_min": 15})
     summary = await desk.run_cycle()
     assert broker.orders == [] and "News-Sperre" in summary["skipped"][0]["reason"]
+
+
+def test_existing_state_without_account_key_keeps_a_plausible_peak(tmp_path):
+    """Update day: a real 5 % drawdown taken before the update must not be forgiven."""
+    import json as _j
+    from src.firm.money.trading_desk import DeskState
+    path = tmp_path / "s.json"
+    path.write_text(_j.dumps({"peak_balance": 1000.0, "day": "2026-10-29", "day_start_balance": 990.0}))
+    st = DeskState(str(path))
+    assert st.bind_account("PAPER:D1:CHF", equity=950.0) is None
+    assert st.peak_balance(950.0) == 1000.0
+    st2 = DeskState(str(path)); st2.data.pop("account_key")
+    assert st2.bind_account("LIVE:L1:CHF", equity=200.0) == "unbound"   # 80 % below: clearly another account
+    assert st2.peak_balance(200.0) == 200.0
