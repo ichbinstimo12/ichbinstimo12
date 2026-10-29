@@ -243,7 +243,7 @@ class AgentRuntime:
             f"You are the {config.role} '{config.name}'. Task ID: {task_id}",
             f"TASK:\n{observation}",
             "FACTS (from the firm's event log and broker snapshots; the only source of truth):\n"
-            + (json.dumps(facts, indent=1, default=str) if facts else "none provided"),
+            + (json.dumps(facts, separators=(",", ":"), ensure_ascii=False, default=str) if facts else "none provided"),
         ]
         archive, hits = screen(self._archive_context(config.name), limit=6000)
         self._taint += hits

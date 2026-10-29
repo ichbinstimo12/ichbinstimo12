@@ -68,6 +68,9 @@ class OllamaLLM(LLMProvider):
             options["temperature"] = temperature
         if max_tokens is not None:
             options["num_predict"] = max_tokens
+        # Without num_ctx Ollama uses its small default window (2-4k tokens) and silently cuts the prompt - the
+        # format instructions get lost and the model answers in free text (AGENT_INVALID).
+        options["num_ctx"] = self.context_size(ollama_messages, max_tokens)
         if options:
             payload["options"] = options
         if json_mode:
@@ -92,6 +95,19 @@ class OllamaLLM(LLMProvider):
             provider="ollama",
             usage=usage,
         )
+
+    @staticmethod
+    def context_size(messages: List[Dict[str, str]], max_tokens: Optional[int]) -> int:
+        """Context window for this request: prompt (~3.5 characters per token) + answer + 25 % margin, rounded up to
+        a power of two, between 8192 and OLLAMA_NUM_CTX_MAX (default 32768). OLLAMA_NUM_CTX fixes it."""
+        fixed = os.getenv("OLLAMA_NUM_CTX")
+        if fixed:
+            return int(fixed)
+        need = sum(len(m.get("content") or "") for m in messages) / 3.5 + (max_tokens or 1024)
+        size = 8192
+        while size < need * 1.25:
+            size *= 2
+        return min(size, int(os.getenv("OLLAMA_NUM_CTX_MAX", "32768")))
 
     async def ping(self) -> None:
         """Server up AND the configured model pulled (GET /api/tags, no generation)."""
