@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -98,7 +99,7 @@ class CapitalMCPTools:
         if url:
             # Getrennter Betrieb: Der Supervisor startet den Server mit den Demo-Schluesseln; dieser Prozess kennt sie nie.
             return await self._connect_http(url, ClientSession)
-        exe = shutil.which(self.command)
+        exe = shutil.which(self.command) or shutil.which(self.command, path=str(Path(sys.executable).parent))
         if not exe:
             self.reason = f"MCP-Server '{self.command}' nicht gefunden (pip install capitalcom-mcp)"
             return False

@@ -41,7 +41,7 @@ htmlcov/
 logs/
 
 # Runtime data (research cache, verdicts, archive, desk state, MCP home)
-data/
-archiv/
-firm_state.json
-reports/
+/data/
+/archiv/
+/firm_state.json
+/reports/

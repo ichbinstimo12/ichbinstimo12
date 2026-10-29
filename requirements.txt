@@ -14,3 +14,4 @@ mcp                 # MCP client for the agents' read-only Capital.com tools
 capitalcom-mcp==0.3.4  # Capital.com MCP server (github.com/SimonTarara62/capitalcom-mcp-server), pinned
 pytest
 pytest-asyncio
+truststore>=0.10  # TLS against the OS certificate store (antivirus/proxy certificates on Windows)

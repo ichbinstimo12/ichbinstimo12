@@ -100,7 +100,9 @@ class Supervisor:
     def _mcp_child(self) -> Optional[Child]:
         if self.base_env.get("FIRM_MCP", "1").strip().lower() in ("0", "false", "no", "off"):
             return None
-        exe = shutil.which(self.base_env.get("FIRM_MCP_COMMAND", "capitalcom-mcp"))
+        cmd = self.base_env.get("FIRM_MCP_COMMAND", "capitalcom-mcp")
+        # start.bat runs .venv/Scripts/python.exe without activating the venv: look next to the interpreter too
+        exe = shutil.which(cmd) or shutil.which(cmd, path=str(Path(sys.executable).parent))
         if not exe:
             logger.warning("capitalcom-mcp not installed - agents run without broker tools.")
             return None
