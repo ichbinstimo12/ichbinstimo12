@@ -135,3 +135,16 @@ async def test_llm_heartbeat_reports_only_state_changes(tmp_path, monkeypatch):
     await asyncio.wait_for(task, 2)
     ev = [json.loads(e["payload_json"]) for e in orch.event_store.get_events(types=["LLM_STATUS"])]
     assert [e["ok"] for e in ev] == [True, False, True] and "refused" in ev[1]["error"]
+
+
+def test_idle_firm_gives_agents_self_directed_work(tmp_path):
+    from src.firm.agents.delegation import IDLE_WORK
+    store = EventStore(str(tmp_path / "s.db"))
+    queue = TaskQueue(store.db_path, store)
+    store.append("TRADING_DESK", "DESK_STATUS", {"reasons": {"GOLD": "keine Forschungsfreigabe"}})
+    sched = AgentScheduler(store, queue, _agents(), now_fn=lambda: 10_000.0, min_gap_seconds=60,
+                           routine_seconds=600, startup_roles=())
+    assert "keine Forschungsfreigabe" in sched.firm_idle()
+    sched.tick()
+    t = queue.list_tasks(limit=10)[0]
+    assert "self-directed work" in t["description"] and IDLE_WORK[t["assigned_to"]][0][:40] in t["description"]

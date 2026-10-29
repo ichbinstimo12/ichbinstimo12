@@ -97,3 +97,32 @@ async def test_desk_wakes_shortly_after_the_next_candle_close(monkeypatch):
     monkeypatch.setattr(firm_main.asyncio, "sleep", fake_sleep)
     await orch._sleep_until_next_bar(60)
     assert clock[0] == pytest.approx(10_001 * 300 + 2.0)  # close + 2 s, not 60 s later
+
+
+def test_shadow_book_tracks_hits_to_target_or_stop_without_trading(tmp_path):
+    from tests.test_smc_tjr import bar
+    cs = bullish_day()[:91]
+    now = [cs[-1]["ts"] + STEP + 3]
+    sc, store, broker, _ = _scanner(tmp_path, cs, now)
+    asyncio.run(sc.refresh_universe())
+    asyncio.run(sc.tick()); asyncio.run(sc.tick())
+    smc = [s for s in sc.shadows if s["strategy"] == "smc_tjr" and s["epic"] == "SMCX"]
+    assert len(smc) == 1 and smc[0]["target"] > smc[0]["entry"] > smc[0]["stop"]
+    target = smc[0]["target"]
+    later = cs + [bar(91 + k, 101, 101.5 + (6 if k == 3 else 0), 100.8, 101.2) for k in range(5)]
+    later[-2]["h"] = target + 0.5                          # target hit before any stop
+    broker.candles = later
+    now[0] = later[-1]["ts"] + STEP + 3
+    asyncio.run(sc.tick()); asyncio.run(sc.tick())
+    res = [json.loads(e["payload_json"]) for e in store.get_events(types=["SHADOW_RESULT"])]
+    mine = [r for r in res if r["strategy"] == "smc_tjr" and r["epic"] == "SMCX"]
+    assert len(mine) == 1 and mine[0]["outcome"] == "target" and mine[0]["r"] > 1.5
+    assert not any(s["strategy"] == "smc_tjr" and s["epic"] == "SMCX" for s in sc.shadows)
+
+
+def test_shadow_stop_first_when_both_in_one_bar(tmp_path):
+    from src.firm.money.scanner import resolve_shadow
+    sh = {"side": "BUY", "entry": 100.0, "stop": 99.0, "target": 102.0, "bar_ts": 0, "cost_r": 0.1, "max_bars": 10}
+    bars = [{"ts": 300, "o": 100, "h": 102.5, "l": 98.5, "c": 101}]
+    out = resolve_shadow(sh, bars, 300)
+    assert out["outcome"] == "stop" and out["r"] == -1.1                    # conservative: stop counts first

@@ -60,6 +60,30 @@ def pick_universe(markets: List[Dict[str, Any]], exclude: List[str], limit: int,
     return out[:max(0, limit)]
 
 
+SHADOW_MAX_BARS = 48          # Schatten-Trade endet spaetestens nach so vielen Kerzen (Daytrading: ~4 h bei 5 min)
+MAX_OPEN_SHADOWS = 500
+
+
+def resolve_shadow(sh: Dict[str, Any], bars: List[Dict[str, Any]], bar_seconds: float) -> Optional[Dict[str, Any]]:
+    """Was waere passiert? Kerzen NACH dem Signal durchgehen: Stop oder Ziel zuerst (beides in einer Kerze = Stop,
+    konservativ), sonst nach max_bars zum Schlusskurs. R abzueglich Spread-Kosten. None = noch offen."""
+    risk = abs(sh["entry"] - sh["stop"])
+    if risk <= 0:
+        return {"outcome": "invalid", "r": 0.0, "bars": 0}
+    d = 1 if sh["side"] == "BUY" else -1
+    after = [b for b in bars if b["ts"] > sh["bar_ts"]]
+    for n, b in enumerate(after, 1):
+        hit_stop = b["l"] <= sh["stop"] if d > 0 else b["h"] >= sh["stop"]
+        hit_target = b["h"] >= sh["target"] if d > 0 else b["l"] <= sh["target"]
+        if hit_stop:
+            return {"outcome": "stop", "r": round(-1.0 - sh["cost_r"], 3), "bars": n}
+        if hit_target:
+            return {"outcome": "target", "r": round(abs(sh["target"] - sh["entry"]) / risk - sh["cost_r"], 3), "bars": n}
+        if n >= sh["max_bars"]:
+            return {"outcome": "time", "r": round(d * (b["c"] - sh["entry"]) / risk - sh["cost_r"], 3), "bars": n}
+    return None
+
+
 class MarketScanner:
     def __init__(self, broker: Any, stream: Any, event_store: Any, whitelist: List[str],
                  resolution: str = "MINUTE_5", universe_size: int = 36, universe_hours: float = 6.0,
@@ -81,6 +105,7 @@ class MarketScanner:
         self._last_boundary = 0.0
         self._last_universe = 0.0
         self._seen_hits: set = set()
+        self.shadows: List[Dict[str, Any]] = []      # Schattenbuch: Signale verfolgen, als waeren sie gehandelt
         self._smc_stage: Dict[str, Optional[str]] = {}
         self.stats = {"markets_total": None, "scans": 0, "hits": 0, "last_scan": None, "errors": 0}
 
@@ -152,6 +177,7 @@ class MarketScanner:
         if quote and quote.get("bid") and quote.get("ask"):
             spread_pct = round((quote["ask"] - quote["bid"]) / ((quote["ask"] + quote["bid"]) / 2) * 100, 5)
         self._smc_update(epic, session, ind, bar_ts)
+        self._resolve_shadows(epic, cs)
         hits = []
         for name in lab.candidates_for(self.resolution):
             if name in SKIP_STRATEGIES or (epic, name, bar_ts) in self._seen_hits:
@@ -168,10 +194,36 @@ class MarketScanner:
                    "note": "Standardparameter; gehandelt wird nur mit Forschungsfreigabe und Whitelist"}
             hits.append(hit)
             self.event_store.append("SCANNER", "SCANNER_HIT", hit)
+            self._open_shadow(hit, sig, quote)
         self.stats["hits"] += len(hits)
         if len(self._seen_hits) > 5000:
             self._seen_hits = {h for h in self._seen_hits if h[2] >= bar_ts - 86400}
         return hits
+
+    def _open_shadow(self, hit: Dict[str, Any], sig, quote) -> None:
+        side, sd, tp = sig
+        if sd <= 0 or len(self.shadows) >= MAX_OPEN_SHADOWS:
+            return
+        d = 1 if side == "BUY" else -1
+        entry = hit["price"]
+        spread = (quote["ask"] - quote["bid"]) if quote and quote.get("ask") and quote.get("bid") else 0.0
+        self.shadows.append({"epic": hit["epic"], "strategy": hit["strategy"], "side": side, "entry": entry,
+                             "stop": entry - d * sd, "target": entry + d * (tp if tp else 2 * sd),
+                             "bar_ts": hit["bar_ts"], "cost_r": round(spread / sd, 3), "max_bars": SHADOW_MAX_BARS,
+                             "whitelisted": hit["whitelisted"]})
+
+    def _resolve_shadows(self, epic: str, cs: List[Dict[str, Any]]) -> None:
+        still = []
+        for sh in self.shadows:
+            out = resolve_shadow(sh, cs, self.bar) if sh["epic"] == epic else None
+            if out is None:
+                still.append(sh)
+                continue
+            self.event_store.append("SCANNER", "SHADOW_RESULT", {
+                **{k: sh[k] for k in ("epic", "strategy", "side", "entry", "stop", "target", "whitelisted")},
+                **out, "resolution": self.resolution,
+                "note": "Schatten-Trade (nicht gehandelt), Standardparameter, Spread abgezogen"})
+        self.shadows = still
 
     def _smc_update(self, epic: str, session: dict, ind, bar_ts: float) -> None:
         ctx = lab.REGISTRY["smc_tjr"](**session).context(ind)

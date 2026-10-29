@@ -20,6 +20,41 @@ ACTION_TYPES = ("tighten_risk", "block_entries", "request_research", "flag", "pr
 EPIC_RE = re.compile(r"^[A-Z0-9_.]{2,20}$|^\*$")
 
 
+SUMMARY_ALIASES = ("summary", "zusammenfassung", "deliverable", "answer", "antwort", "report", "bericht",
+                   "assessment", "analysis", "result", "response", "content", "text", "lagebild")
+
+
+def normalize_answer(obj: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Kleine lokale Modelle weichen oft vom Format ab: Grossschreibung, andere Schluessel, verschachtelt, Liste/Objekt
+    statt Text. Formfehler werden hier korrigiert; Inhalte (Zahlen, Aktionen) bleiben unveraendert und werden danach
+    normal geprueft. Ohne verwertbaren Text -> None."""
+    if not isinstance(obj, dict):
+        return None
+    low = {str(k).strip().lower(): v for k, v in obj.items()}
+    if "summary" not in low:
+        for inner in low.values():                       # {"response": {"summary": ...}} / {"Answer": {...}}
+            if isinstance(inner, dict) and any(str(k).lower() in SUMMARY_ALIASES for k in inner):
+                return normalize_answer({**{k: v for k, v in obj.items() if not isinstance(v, dict)}, **inner})
+    out = dict(obj)
+    for k in list(out):
+        lk = str(k).strip().lower()
+        if lk != k and lk in ("summary", "claims", "actions", "lesson", "tool", "args"):
+            out[lk] = out.pop(k)
+    if "summary" not in out:
+        alias = next((k for k in out if str(k).strip().lower() in SUMMARY_ALIASES), None)
+        if alias is not None:
+            out["summary"] = out.pop(alias)
+    summ = out.get("summary")
+    if isinstance(summ, list):
+        summ = " ".join(str(x) for x in summ)
+    elif isinstance(summ, dict):
+        summ = "; ".join(f"{k}: {v}" for k, v in summ.items())
+    if summ is None or not str(summ).strip():
+        return None
+    out["summary"] = str(summ).strip()
+    return out
+
+
 def extract_json(text: str) -> Optional[Dict[str, Any]]:
     """Erstes vollstaendiges JSON-Objekt aus einer Modellantwort (auch in ```json-Bloecken)."""
     if not text:

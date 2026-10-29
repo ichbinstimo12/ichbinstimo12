@@ -112,6 +112,9 @@ def build_facts(event_store, mode: str, gate=None, overlay=None, desk=None) -> D
             "recent_hits": [{k: v for k, v in _payload(e).items() if k in ("epic", "strategy", "side", "whitelisted")}
                             | {"ts": e.get("ts")} for e in event_store.get_events(types=["SCANNER_HIT"], last=8)],
         }
+    shadow = shadow_stats(event_store)
+    if shadow:
+        facts["shadow_book"] = shadow
     setups: Dict[str, Any] = {}
     for e in event_store.get_events(types=["SMC_SETUP"], last=40):
         p = _payload(e)
@@ -128,6 +131,25 @@ def build_facts(event_store, mode: str, gate=None, overlay=None, desk=None) -> D
             for r in overlay.active()
         ]
     return facts
+
+
+def shadow_stats(event_store, last: int = 1000) -> Optional[Dict[str, Any]]:
+    """Schattenbuch: Scanner-Signale, verfolgt als waeren sie gehandelt (nach Spread). Echte Vorwaertsdaten."""
+    rows = [_payload(e) for e in event_store.get_events(types=["SHADOW_RESULT"], last=last)]
+    rows = [r for r in rows if isinstance(r.get("r"), (int, float))]
+    if not rows:
+        return None
+
+    def agg(key):
+        groups: Dict[str, List[float]] = {}
+        for r in rows:
+            groups.setdefault(str(r.get(key)), []).append(r["r"])
+        out = [{key: k, "n": len(v), "avg_r": round(sum(v) / len(v), 3),
+                "win_rate": round(sum(1 for x in v if x > 0) / len(v), 2)} for k, v in groups.items() if len(v) >= 3]
+        return sorted(out, key=lambda g: g["avg_r"], reverse=True)[:8]
+    return {"results": len(rows), "by_strategy": agg("strategy"), "by_market": agg("epic"),
+            "note": "Schatten-Trades = nicht gehandelt, Standardparameter, Spread abgezogen. Unter 30 je Gruppe nur "
+                    "Hinweis. Gut laufende Maerkte/Strategien -> request_research; nie als Gewinnversprechen."}
 
 
 # -------------------------------------------------------------- fact checking

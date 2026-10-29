@@ -265,6 +265,22 @@ Nur mit gültigem, nicht abgelaufenem Token (`live_token.json`). Ohne Token
 lehnt das ExecutionGateway jeden Live-Order ab. Limits in `config/limits.toml`
 bleiben unverändert und sind für Agenten read-only.
 
+## 5b. Windows: Befehle
+
+`start.bat` startet die Firma mit Dashboard. Alle anderen Befehle über `firm.bat` (nutzt automatisch die
+Projekt-Umgebung `.venv`; in PowerShell mit `.\firm`): `firm status`, `firm doctor`, `firm eval`, `firm halt`,
+`firm resume`, `firm notify-test`, `firm approve-live`. Nicht `python -m src.firm ...` direkt aufrufen – das nimmt
+das System-Python ohne die installierten Pakete (`No module named 'httpx'`).
+
+## 5c. Wenn nicht gehandelt werden darf: Schattenbuch und selbst gesuchte Arbeit
+
+Der Scanner verfolgt jedes Signal auf allen beobachteten Märkten wie einen Trade (Stop oder Ziel zuerst, Spread
+abgezogen; Stop und Ziel in einer Kerze = Stop) und schreibt SHADOW_RESULT. Das sind echte Vorwärtsdaten ohne
+Geldeinsatz. Hat die Firma seit 2 h keinen Fill (oder keine Forschungsfreigabe), bekommen die Agenten im Routine-Takt
+statt einer allgemeinen Prüfung konkrete, wechselnde Aufgaben (IDLE_WORK in `src/firm/agents/delegation.py`):
+Schattenbuch auswerten, Forschung für vielversprechende Märkte anstoßen, Kosten prüfen, Hypothesen formulieren,
+Lehrstoff fürs Fallbuch. Gehandelt wird weiterhin nur mit Forschungsfreigabe.
+
 ## 6. Docker / 24/7-Server
 
 Schritt-für-Schritt: **docs/deploy_vps.md**. Kurz: `./scripts/firmctl.sh start | status | logs | halt | resume |

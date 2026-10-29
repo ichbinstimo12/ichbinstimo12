@@ -112,10 +112,12 @@ async def test_claim_contradicting_facts_is_rejected(event_store):
 
 @pytest.mark.asyncio
 async def test_free_text_answer_is_invalid(event_store):
-    runtime = AgentRuntime(event_store, llm=ScriptedLLM("I think the market looks bullish."), whitelist=WHITELIST)
+    # free text twice (also after the one format correction) stays invalid
+    llm = ScriptedLLM("I think the market looks bullish.", "Still bullish, no JSON.")
+    runtime = AgentRuntime(event_store, llm=llm, whitelist=WHITELIST)
     runtime.active_agents["RiskOfficer"] = _config()
     result = await runtime.step("RiskOfficer", "Check", "task-3", facts=_facts())
-    assert result["status"] == "invalid"
+    assert result["status"] == "invalid" and len(llm.calls) == 2
 
 
 @pytest.mark.asyncio

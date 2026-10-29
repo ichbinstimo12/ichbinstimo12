@@ -120,3 +120,36 @@ def test_propose_hire_action_validation():
     ok, _ = validate_action({"type": "propose_hire", "role": "../../etc", "reason": "12 open data-quality tasks"},
                             ["propose_hire"], [])
     assert not ok
+
+
+def test_normalize_answer_fixes_format_but_not_content():
+    from src.firm.agents.actions import normalize_answer
+    assert normalize_answer({"Summary": "ok", "Actions": []}) == {"summary": "ok", "actions": []}
+    assert normalize_answer({"report": "Lage ruhig", "claims": {"balance": 1}})["summary"] == "Lage ruhig"
+    assert normalize_answer({"response": {"summary": "verschachtelt"}})["summary"] == "verschachtelt"
+    assert normalize_answer({"summary": ["a", "b"]})["summary"] == "a b"
+    assert normalize_answer({"summary": ""}) is None and normalize_answer({"foo": 1}) is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_format_gets_one_repair_round(tmp_path):
+    from src.firm.agents.runtime import AgentRuntime, AgentConfig
+    from src.firm.llm.base import LLMResponse
+    replies = iter(["Hier ist mein Bericht: alles ruhig.", '{"summary": "alles ruhig", "claims": {}, "actions": []}'])
+
+    class LLM:
+        provider_name, model = "fake", "m"
+        seen = []
+
+        async def generate(self, system_prompt, messages, max_tokens=None, temperature=None, json_mode=False):
+            LLM.seen.append(messages[-1]["content"])
+            return LLMResponse(content=next(replies), model="m", provider="fake")
+
+        async def close(self):
+            pass
+    store = EventStore(str(tmp_path / "r.db"))
+    rt = AgentRuntime(store, llm=LLM(), reflect=False)
+    rt.active_agents["A"] = AgentConfig(name="A", role="A", system_prompt="x", tool_allowlist=[])
+    res = await rt.step("A", "check", "t1", facts={})
+    assert res["status"] == "success" and res["deliverable"] == "alles ruhig"
+    assert "required format" in LLM.seen[-1]
