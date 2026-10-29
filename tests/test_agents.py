@@ -257,3 +257,11 @@ def test_ceo_hiring_flow(event_store):
     assert ceo.hiring_requests[req_id].status == RequestStatus.PENDING
     ceo.approve_hire(req_id)
     assert ceo.hiring_requests[req_id].status == RequestStatus.APPROVED
+
+
+def test_saying_unknown_is_not_a_false_number():
+    from src.firm.agents.facts import check_claims
+    facts = {"account": {"balance": 1000.0, "equity": 1000.0}, "open_positions": 0}
+    assert check_claims({"balance": "UNKNOWN", "equity": None}, facts) == []
+    assert check_claims({"balance": 1200}, facts) == ["balance: behauptet 1200, Fakt ist 1000"]
+    assert check_claims({"balance": 5}, {"account": "UNKNOWN (kein Snapshot)"}) == ["balance: behauptet 5, Fakt ist UNBEKANNT"]

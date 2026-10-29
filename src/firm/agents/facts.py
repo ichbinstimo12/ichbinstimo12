@@ -168,14 +168,17 @@ def check_claims(claims: Any, facts: Dict[str, Any]) -> List[str]:
     for key, claimed in claims.items():
         if key not in known:
             continue
+        try:
+            c = float(claimed)
+        except (TypeError, ValueError):
+            continue        # "UNKNOWN", "unbekannt", None ...: no number claimed -> nothing to contradict
         truth = known[key]
         if truth is None:
-            problems.append(f"{key}: behauptet {claimed}, Fakt ist UNBEKANNT")
+            problems.append(f"{key}: behauptet {c:g}, Fakt ist UNBEKANNT")
             continue
         try:
-            c, t = float(claimed), float(truth)
+            t = float(truth)
         except (TypeError, ValueError):
-            problems.append(f"{key}: '{claimed}' ist keine Zahl")
             continue
         tol = 0.0 if key in ("open_positions", "closed_trades") else max(0.01, abs(t) * 0.002)
         if abs(c - t) > tol:
