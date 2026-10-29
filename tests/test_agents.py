@@ -98,9 +98,10 @@ async def test_valid_answer_is_recorded_and_uses_json_mode(event_store):
 @pytest.mark.asyncio
 async def test_claim_contradicting_facts_is_rejected(event_store):
     """The old agents wrote 'no exposure' while a position was open. That answer must be thrown away."""
-    llm = ScriptedLLM({"summary": "No exposure.", "claims": {"open_positions": 0},
-                       "actions": [{"type": "flag", "severity": "info", "reason": "all quiet on the book"}],
-                       "lesson": "GOLD is always flat on Mondays at 10:00"})
+    wrong = {"summary": "No exposure.", "claims": {"open_positions": 0},
+             "actions": [{"type": "flag", "severity": "info", "reason": "all quiet on the book"}],
+             "lesson": "GOLD is always flat on Mondays at 10:00"}
+    llm = ScriptedLLM(wrong, wrong)          # repeats the wrong number after the one correction round
     runtime = AgentRuntime(event_store, llm=llm, whitelist=WHITELIST)
     runtime.active_agents["RiskOfficer"] = _config()
     result = await runtime.step("RiskOfficer", "Check risk", "task-2", facts=_facts(open_positions=1))
@@ -265,3 +266,16 @@ def test_saying_unknown_is_not_a_false_number():
     assert check_claims({"balance": "UNKNOWN", "equity": None}, facts) == []
     assert check_claims({"balance": 1200}, facts) == ["balance: behauptet 1200, Fakt ist 1000"]
     assert check_claims({"balance": 5}, {"account": "UNKNOWN (kein Snapshot)"}) == ["balance: behauptet 5, Fakt ist UNBEKANNT"]
+
+
+@pytest.mark.asyncio
+async def test_wrong_number_gets_one_correction_then_counts(event_store):
+    fixed = ScriptedLLM({"summary": "Konto ok", "claims": {"balance": 0}}, {"summary": "Konto ok", "claims": {}})
+    rt = AgentRuntime(event_store, llm=fixed, whitelist=WHITELIST)
+    rt.active_agents["RiskOfficer"] = _config()
+    res = await rt.step("RiskOfficer", "Check", "task-c1", facts=_facts())
+    assert res["status"] == "success" and "contradict FACTS" in fixed.calls[1]["messages"][-1]["content"]
+    stubborn = ScriptedLLM({"summary": "x", "claims": {"balance": 0}}, {"summary": "x", "claims": {"balance": 0}})
+    rt2 = AgentRuntime(event_store, llm=stubborn, whitelist=WHITELIST)
+    rt2.active_agents["RiskOfficer"] = _config()
+    assert (await rt2.step("RiskOfficer", "Check", "task-c2", facts=_facts()))["status"] == "invalid"

@@ -31,7 +31,7 @@ To use a tool first, answer only: {"tool": "<tool name>", "args": {...}}  (at mo
 Final answer format:
 {
   "summary": "max 120 words. Use ONLY numbers that appear in FACTS or in tool results. If something is not there, write UNKNOWN.",
-  "claims": {"open_positions": <int>, "balance": <number>},   // the fact numbers your summary relies on (optional, checked automatically)
+  "claims": {},   // usually leave EMPTY. Only if your summary states balance/equity/open_positions/closed_trades, copy that exact number from FACTS here (checked automatically). Never write 0 as a placeholder.
   "actions": [],                                             // optional, allowed types for you: %s
   "lesson": null                                             // or ONE testable sentence about a market/strategy/number, e.g. "GOLD donchian_trend entries during spread > 0.1 ATR were rejected"
 }
@@ -325,8 +325,9 @@ class AgentRuntime:
         raw = ""
         tool_calls = 0
         repaired = False
+        fact_repaired = False
         try:
-            for _ in range(MAX_TOOL_CALLS + 3):
+            for _ in range(MAX_TOOL_CALLS + 4):
                 raw = await self._call_llm(provider, system_prompt, messages)
                 parsed = extract_json(raw)
                 if parsed and "tool" in parsed and "summary" not in parsed:
@@ -353,6 +354,14 @@ class AgentRuntime:
                                   + json.dumps(safe_out, default=str)[:4000]}]
                     continue
                 answer = normalize_answer(parsed)
+                wrong = check_claims(answer.get("claims"), facts) if (answer and facts) else []
+                if wrong and not fact_repaired:
+                    fact_repaired = True                 # one chance to correct numbers that contradict FACTS
+                    messages += [{"role": "assistant", "content": raw[:2000]},
+                                 {"role": "user", "content": "Your claims contradict FACTS: " + "; ".join(wrong)
+                                  + ". Reply again with the same JSON format, using the exact numbers from FACTS "
+                                    "or an empty claims object {}."}]
+                    continue
                 if answer is None and not repaired:
                     repaired = True                      # one format correction, then it counts as invalid
                     messages += [{"role": "assistant", "content": raw[:2000]},
