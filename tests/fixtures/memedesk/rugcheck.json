@@ -228,5 +228,12 @@
   }
  },
  "graphInsidersDetected": 0,
- "totalMarketLiquidity": 94925.6767659089
+ "totalMarketLiquidity": 94925.6767659089,
+ "token": {
+  "mintAuthority": null,
+  "supply": 984892025839018,
+  "decimals": 6,
+  "isInitialized": true,
+  "freezeAuthority": null
+ }
 }

@@ -140,6 +140,20 @@ class MemeSources:
             "boosts": int((p.get("boosts") or {}).get("active") or 0),
         }
 
+    async def native_prices(self, mints: List[str]) -> Dict[str, float]:
+        """Preis in SOL je Token (liquidestes SOL-Paar) - bis zu 30 Tokens je Abruf, grosszuegiges Rate-Limit."""
+        base = self.cfg.get("dexscreener", "https://api.dexscreener.com")
+        out: Dict[str, Tuple[float, float]] = {}
+        for i in range(0, len(mints), 30):
+            rows = await self._get("dexscreener", f"{base}/tokens/v1/solana/{','.join(mints[i:i + 30])}")
+            for p in rows or []:
+                mint = (p.get("baseToken") or {}).get("address")
+                price, liq = _f(p.get("priceNative")), (_f((p.get("liquidity") or {}).get("usd")) or 0.0)
+                if mint and price and (p.get("quoteToken") or {}).get("address") == SOL_MINT:
+                    if mint not in out or liq > out[mint][1]:
+                        out[mint] = (price, liq)
+        return {m: v[0] for m, v in out.items()}
+
     # ------------------------------------------------------------------ RugCheck
     async def safety_report(self, mint: str) -> Dict[str, Any]:
         base = self.cfg.get("rugcheck", "https://api.rugcheck.xyz/v1")
@@ -161,6 +175,7 @@ class MemeSources:
             "total_holders": int(d.get("totalHolders") or 0), "score": int(d.get("score") or 0),
             "risks": [(str(r.get("name")), str(r.get("level"))) for r in d.get("risks") or []],
             "rugged": bool(d.get("rugged")),
+            "decimals": (d.get("token") or {}).get("decimals"),
         }
 
     # ------------------------------------------------------------------ Jupiter

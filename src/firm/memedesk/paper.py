@@ -54,14 +54,21 @@ async def paper_sell_value(sources, mint: str, tokens_raw: float, cfg: Dict[str,
     return {"sol": sol, "slippage_bps": bps, "impact_pct": q["impact_pct"], "route": q["route"]}
 
 
-def estimate_value(pos: Dict[str, Any], prices: Dict[str, Dict[str, float]], cfg: Dict[str, Any]) -> Optional[float]:
-    """Bewertung ohne Quote: Token-Menge x Preis (Jupiter-Preis-API), umgerechnet in SOL, minus geschaetzte
-    Ausstiegskosten (Slippage/Impact vom Einstieg, Swap-Gebuehr, Priority-Fee). None = kein Preis."""
-    p, s = prices.get(pos["mint"]), prices.get(SOL_MINT)
-    if not p or not s or not s.get("usd") or p.get("decimals") is None:
+def estimate_value(pos: Dict[str, Any], prices: Dict[str, Dict[str, float]], cfg: Dict[str, Any],
+                   native: Optional[Dict[str, float]] = None) -> Optional[float]:
+    """Bewertung ohne Quote: Token-Menge x Preis in SOL (DexScreener priceNative, sonst Jupiter USD-Preise),
+    minus geschaetzte Ausstiegskosten (Slippage/Impact vom Einstieg, Swap-Gebuehr, Priority-Fee). None = kein Preis."""
+    p, s = prices.get(pos["mint"]) or {}, prices.get(SOL_MINT) or {}
+    decimals = pos.get("decimals") if pos.get("decimals") is not None else p.get("decimals")
+    if decimals is None:
         return None
-    tokens = float(pos["tokens_raw"]) / (10 ** int(p["decimals"]))
-    gross = tokens * p["usd"] / s["usd"]
+    tokens = float(pos["tokens_raw"]) / (10 ** int(decimals))
+    if native and native.get(pos["mint"]):
+        gross = tokens * native[pos["mint"]]
+    elif p.get("usd") and s.get("usd"):
+        gross = tokens * p["usd"] / s["usd"]
+    else:
+        return None
     cost = float(pos.get("exit_cost_pct") or 3.0) / 100 + cfg["execution"]["dex_fee_pct"] / 100
     return max(0.0, gross * (1 - cost) - cfg["execution"]["priority_fee_sol"])
 

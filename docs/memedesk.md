@@ -76,6 +76,11 @@ Wallet, einen verschlüsselt gespeicherten Schlüssel nur im Executor-Prozess, s
 App-Bestätigung für jeden Kauf über `confirm_above_sol`. Das wird ergänzt, wenn die PAPER-Kriterien erfüllt sind –
 vorher gäbe es keine belastbare Grundlage dafür.
 
+## Testlauf
+
+`python scripts/memedesk_paper_run.py --minutes 10` läuft isoliert gegen die echten Quellen und schreibt ein
+Protokoll. Ein echter Beispiel-Lauf liegt in `docs/memedesk_example_log.md`.
+
 ## Annahmen und Grenzen
 
 - Swap-Gebühr 0.25 % je Seite und Priority-Fee 0.0005 SOL sind **ANNAHMEN** (je nach Pool bis 1 %).

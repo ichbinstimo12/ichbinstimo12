@@ -35,7 +35,7 @@ async def test_safety_report_excludes_pool_accounts_from_holders():
     r = await s.safety_report(MINT)
     assert r["mint_authority"] is None and r["freeze_authority"] is None
     assert r["lp_locked_pct"] == 100 and r["total_holders"] > 1000
-    assert r["top_holder_pct"] < 1.0          # the 5 % holder is the pump.fun AMM pool, not a whale
+    assert r["top_holder_pct"] < 1.0 and r["decimals"] == 6   # the 5 % holder is the AMM pool, not a whale
     await s.close()
 
 

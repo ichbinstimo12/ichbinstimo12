@@ -47,6 +47,7 @@ class MemeDesk:
         self.watchlist: Dict[str, Dict[str, Any]] = {}
         self._safety_cache: Dict[str, Any] = {}
         self._candle_cache: Dict[str, Any] = {}
+        self._error_at: Dict[str, float] = {}
         self._veto_until: Dict[str, float] = {}
         self._holders: Dict[str, List[tuple]] = {}
         self._wallet_cursor: Dict[str, str] = {}
@@ -244,6 +245,7 @@ class MemeDesk:
             "tiers_done": [], "realized_sol": 0.0, "last_move_at": t, "last_move_value": fill["cost_sol"],
             "creator_balance": (report or {}).get("creator_balance"), "liquidity_at_entry": pair.get("liquidity_usd"),
             "exit_cost_pct": round(fill["slippage_bps"] / 200 + float(fill["impact_pct"] or 0), 3),
+            "decimals": (report or {}).get("decimals"),
             "metrics": ev["metrics"], "signals": ev["signals"], "structure_ok": ev["signals"]["structure"],
             "distribution_ok": ev["signals"]["distribution"], "holders_up": ev["signals"]["volume_holders"],
         }
@@ -264,15 +266,22 @@ class MemeDesk:
         killed = self._killed() or bool(self.state.get("halted"))
         marked = float(self.state["equity"])
         mints = list(self.state["positions"])
-        try:
-            prices = await self.src.prices(mints + [paper.SOL_MINT]) if mints else {}
-        except Exception as e:
-            prices = {}
-            self.log("EXECUTOR", "MEME_ERROR", {"error": f"Preise: {str(e)[:150]}"})
+        native, prices = {}, {}
+        if mints:
+            try:
+                native = await self.src.native_prices(mints)          # DexScreener: price in SOL, generous limit
+            except Exception as e:
+                self._error_once("prices_dex", f"DexScreener-Preise: {str(e)[:150]}")
+            if any(m not in native for m in mints):
+                try:
+                    prices = await self.src.prices(mints + [paper.SOL_MINT])   # fallback: Jupiter USD prices
+                except Exception as e:
+                    self._error_once("prices_jup", f"Jupiter-Preise: {str(e)[:150]}")
         for mint, pos in list(self.state["positions"].items()):
-            value = paper.estimate_value(pos, prices, self.cfg)
-            if value is None:       # no price: keep the last value, retry next cycle (and say so)
-                self.log("EXECUTOR", "MEME_ERROR", {"mint": mint, "error": "kein Preis fuer Bewertung"})
+            value = paper.estimate_value(pos, prices, self.cfg, native)
+            if value is None:       # no price: keep the last value, retry next cycle (said once a minute)
+                self._error_once(f"noprice:{mint}", f"kein Preis fuer {pos.get('symbol') or mint[:6]} - Stops "
+                                                    "pausieren bis ein Preis kommt", mint=mint)
                 marked += float(pos.get("last_value") or pos["cost_sol"])
                 continue
             pos["last_value"] = value
@@ -348,6 +357,12 @@ class MemeDesk:
             except Exception:
                 pass
         return alerts
+
+    def _error_once(self, key: str, error: str, every: float = 60.0, **extra) -> None:
+        """Error event at most once per `every` seconds per key (no log flooding during an API outage)."""
+        if self.now() - self._error_at.get(key, -1e12) >= every:
+            self._error_at[key] = self.now()
+            self.log("EXECUTOR", "MEME_ERROR", {"error": error, **extra})
 
     # ------------------------------------------------------------------ kill switch, watchlist, status
     def _killed(self) -> bool:

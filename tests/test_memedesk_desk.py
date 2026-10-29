@@ -40,13 +40,18 @@ class FakeSources:
         return self.pairs[mint]
 
     async def safety_report(self, mint):
-        return {**SAFE, "mint_authority": "EVIL" if mint == "RUG" else None}
+        return {**SAFE, "mint_authority": "EVIL" if mint == "RUG" else None, "decimals": 6}
 
     async def roundtrip_loss_pct(self, mint, sol=0.1):
         return 3.0, {}
 
     async def candles(self, pool, minutes=5, limit=48):
         return breakout()
+
+    async def native_prices(self, mints):
+        if getattr(self, "dex_down", False):
+            raise RuntimeError("dexscreener down")
+        return {m: 1.0 * self.value_mult for m in mints}       # 1e6 raw units (6 decimals) = 1 token = 1 SOL x mult
 
     async def prices(self, mints):
         out = {m: {"usd": 100.0 * self.value_mult, "decimals": 6} for m in mints}
@@ -176,3 +181,13 @@ def test_drawdown_stop_sells_everything(tmp_path):
     now[0] += 5
     asyncio.run(d.manage())
     assert d.state["positions"] == {} and "Desk-Stopp" in types(store, "MEME_TRADE_CLOSE")[0]["reason"]
+
+
+def test_valuation_falls_back_to_jupiter_when_dexscreener_fails(tmp_path):
+    now, src = [NOW], FakeSources()
+    d, store = desk(tmp_path, src, now)
+    asyncio.run(d.scan())
+    src.dex_down, src.value_mult = True, 0.6
+    now[0] += 60
+    asyncio.run(d.manage())
+    assert types(store, "MEME_TRADE_CLOSE")[0]["reason"].startswith("harter Stop")
