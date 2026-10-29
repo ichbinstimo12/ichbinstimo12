@@ -359,6 +359,24 @@ class TradingDesk:
         self._closed_market_logged: set = set()
 
     # ------------------------------------------------------------- v2 helpers
+    def _news_blackout(self, epic: str) -> Optional[str]:
+        """No new entries around high-impact economic releases (calendar written by the news wire). Risk reduction
+        only: a missing or old calendar never blocks and never enlarges anything."""
+        try:
+            ev = self.event_store.get_events(types=["ECON_CALENDAR"], last=1)
+            if not ev:
+                return None
+            p = json.loads(ev[-1]["payload_json"] or "{}")
+            if not hasattr(self, "_news_ccy"):
+                from src.firm.data.news import load_config
+                self._news_ccy = load_config().get("currencies") or {}
+            from src.firm.data.news import blackout_for
+            return blackout_for(epic, p.get("high_impact") or [], time.time(), self._news_ccy,
+                                float(p.get("blackout_before_min", 15)), float(p.get("blackout_after_min", 15)))
+        except Exception as e:
+            logger.warning(f"news blackout check failed: {e}")
+            return None
+
     def _engine_for(self, strategy: str, params: Optional[dict], resolution: Optional[str] = None) -> SignalEngineV2:
         res = resolution or self.resolution
         key = f"{strategy}:{res}:{json.dumps(params or {}, sort_keys=True)}"
@@ -718,6 +736,10 @@ class TradingDesk:
             stopped = self._stopped(epic, strat)
             if stopped:
                 summary["skipped"].append({"epic": epic, "reason": stopped})
+                continue
+            news_block = self._news_blackout(epic)
+            if news_block:
+                summary["skipped"].append({"epic": epic, "reason": news_block})
                 continue
             if self.mode.upper() == "LIVE_MICRO":
                 risk_factor *= 0.5          # erste Live-Stufe: halbes Risiko pro Trade (Skalierungs-Leiter)

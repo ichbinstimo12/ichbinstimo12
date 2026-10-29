@@ -548,3 +548,15 @@ async def test_daytrade_style_desk_skips_a_swing_verdict(desk_env, monkeypatch):
     desk = build_gated_desk(desk_env, broker)
     summary = await desk.run_cycle()
     assert broker.orders == [] and "Daytrading" in summary["skipped"][0]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_no_entry_right_before_a_high_impact_release(desk_env):
+    import time as _t
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker)
+    desk.event_store.append("NEWS", "ECON_CALENDAR", {"high_impact": [
+        {"title": "FOMC Statement", "country": "USD", "ts": _t.time() + 300}],
+        "blackout_before_min": 15, "blackout_after_min": 15})
+    summary = await desk.run_cycle()
+    assert broker.orders == [] and "News-Sperre" in summary["skipped"][0]["reason"]

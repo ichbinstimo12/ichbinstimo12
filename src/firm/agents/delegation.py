@@ -99,7 +99,9 @@ DELEGATION_PLAN: Dict[str, Dict[str, str]] = {
     "Archivist": {
         "title": "Gedaechtnis pruefen",
         "description": (
-            "Read the archive summary. Name one lesson that is confirmed by archived trades and one that is noise. "
+            "Read FACTS.journal (case files of real trades with context, patterns with trade ids) and the archive "
+            "summary. For the newest cases: what can the firm learn (setup quality, session, news)? Name one lesson "
+            "confirmed by several cases (cite trade ids) and one pattern that is still noise. Flag losing patterns. "
             "Quote only archived facts. You cannot delete files - the curator does that."
         ),
     },

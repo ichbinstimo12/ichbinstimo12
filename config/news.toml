@@ -1,0 +1,78 @@
+# Nachrichtenquellen fuer den News-Ticker (Brain-Zone). Alle 5 s wird geprueft, welche Quelle faellig ist;
+# jede Quelle wird hoechstens alle `min_interval_s` Sekunden abgerufen (schneller aendern sich RSS-Feeds nicht,
+# und zu haeufige Abrufe fuehren zu Sperren). Abruf mit ETag/If-Modified-Since: unveraendert = kaum Datenverkehr.
+# Ueberschriften sind fremder Text: sie werden auf Prompt-Injection geprueft und nie als Anweisung behandelt.
+
+poll_seconds = 5
+default_min_interval_s = 60
+
+[[feed]]
+name = "InvestingLive (ex ForexLive)"
+url = "https://investinglive.com/feed/news"
+min_interval_s = 30
+
+[[feed]]
+name = "Investing.com Forex"
+url = "https://www.investing.com/rss/news_1.rss"
+
+[[feed]]
+name = "Investing.com Commodities"
+url = "https://www.investing.com/rss/news_11.rss"
+
+[[feed]]
+name = "Investing.com Economy"
+url = "https://www.investing.com/rss/news_25.rss"
+
+[[feed]]
+name = "MarketWatch Top Stories"
+url = "https://feeds.content.dowjones.io/public/rss/mw_topstories"
+
+[[feed]]
+name = "FT Markets"
+url = "https://www.ft.com/markets?format=rss"
+min_interval_s = 120
+
+[[feed]]
+name = "CoinDesk"
+url = "https://www.coindesk.com/arc/outboundfeeds/rss"
+
+[[feed]]
+name = "Cointelegraph"
+url = "https://cointelegraph.com/rss"
+
+[[feed]]
+name = "Federal Reserve"
+url = "https://www.federalreserve.gov/feeds/press_all.xml"
+min_interval_s = 120
+
+[[feed]]
+name = "EZB"
+url = "https://www.ecb.europa.eu/rss/press.html"
+min_interval_s = 120
+
+[[feed]]
+name = "BBC Business"
+url = "https://feeds.bbci.co.uk/news/business/rss.xml"
+min_interval_s = 120
+
+[calendar]
+# Wirtschaftskalender (ForexFactory-Export). Selten abrufen: der Anbieter begrenzt Abrufe.
+url = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+min_interval_s = 1800
+# Einstiegssperre um High-Impact-Termine der betroffenen Waehrungen (Minuten davor / danach)
+blackout_before_min = 15
+blackout_after_min = 15
+
+# Schlagwoerter -> Markt (fuer Meldungen, die einen Whitelist-Markt betreffen). Kleinschreibung, Regex erlaubt.
+[keywords]
+EURUSD = ["eur/usd", "eurusd", "\\becb\\b", "lagarde", "euro ?zone", "\\beuro\\b", "\\bfed\\b", "fomc", "powell", "us (cpi|pce|nonfarm|payrolls)"]
+GOLD = ["\\bgold\\b", "xau", "bullion", "precious metal", "fomc", "powell"]
+BTCUSD = ["bitcoin", "\\bbtc\\b", "crypto", "\\betf\\b.*bitcoin"]
+AAPL = ["\\bapple\\b", "\\baapl\\b", "iphone", "tim cook"]
+
+# Waehrungen, deren High-Impact-Termine einen Markt betreffen
+[currencies]
+EURUSD = ["EUR", "USD"]
+GOLD = ["USD"]
+BTCUSD = ["USD"]
+AAPL = ["USD"]

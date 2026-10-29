@@ -284,6 +284,11 @@ class FirmOrchestrator:
             self.event_store, self.task_queue, self.agent_runtime.active_agents,
             min_gap_seconds=float(os.getenv("FIRM_AGENT_MIN_GAP_MIN", "10")) * 60,
             routine_seconds=float(os.getenv("FIRM_AGENT_ROUTINE_MIN", "30")) * 60)
+        if os.getenv("FIRM_NEWS", "1").strip().lower() not in ("0", "false", "no", "off"):
+            from src.firm.data.news import NewsWire
+            self.news = NewsWire(self.event_store)
+            self._background_tasks.append(asyncio.create_task(self.news.run(lambda: self.is_running)))
+        self._background_tasks.append(asyncio.create_task(self.casebook_loop()))
         self._background_tasks += [
             asyncio.create_task(self.llm_heartbeat_loop()),
             asyncio.create_task(self.scheduler_loop()),
@@ -332,6 +337,21 @@ class FirmOrchestrator:
             except Exception as e:
                 logger.error(f"Hiring loop error: {e}")
             await asyncio.sleep(10)
+
+    async def casebook_loop(self):
+        """Archivist's deterministic half: every closed trade becomes a case file with its context (JOURNAL_ENTRY)."""
+        from src.firm.archive.casebook import Casebook
+        book = Casebook(self.event_store, os.getenv("FIRM_ARCHIVE_DIR", "archiv"))
+        while self.is_running:
+            try:
+                new = await asyncio.to_thread(book.sync)
+                if new:
+                    logger.info(f"Casebook: {len(new)} new trade case(s) archived.")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Casebook error: {e}")
+            await asyncio.sleep(float(os.getenv("FIRM_CASEBOOK_SECONDS", "60")))
 
     async def llm_heartbeat_loop(self):
         """Is the agents' LLM reachable? Checked every minute without generating tokens; changes become an
@@ -810,6 +830,8 @@ class FirmOrchestrator:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
         self._background_tasks = []
+        if getattr(self, "news", None) is not None:
+            await self.news.close()
         if self.agent_runtime is not None:
             await self.agent_runtime.close()
         await self.tools.close()
