@@ -62,6 +62,11 @@ def build_facts(event_store, mode: str, gate=None, overlay=None, desk=None) -> D
             "verdicts": ov.get("verdicts"),
         }
 
+    try:
+        from src.firm.reports import performance
+        facts["performance_30d"] = performance.cached_findings(event_store)
+    except Exception:
+        facts["performance_30d"] = "UNKNOWN"
     results = event_store.get_events(types=["TRADE_RESULT"], last=20)
     rows = [_payload(e) | {"ts": e.get("ts")} for e in results]
     facts["recent_trade_results"] = [

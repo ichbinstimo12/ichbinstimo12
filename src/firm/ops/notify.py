@@ -70,6 +70,11 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
             return "KI wieder verbunden", f"{p.get('provider')} {p.get('model') or ''}", LOW, f"llm:{e['id']}"
         return "KI getrennt", f"{p.get('provider')}: {str(p.get('error'))[:200]} - Agenten pausieren, Handel laeuft " \
             "deterministisch weiter", HIGH, "llm_down"
+    if t == "RECONCILER_BLIND":
+        return "Abgleich mit Broker gestoert", f"{p.get('consecutive_errors')} Fehlversuche in Folge: " \
+            f"{str(p.get('error'))[:150]}", HIGH, "reconciler_blind"
+    if t == "RECONCILER_RECOVERED":
+        return "Abgleich mit Broker wieder ok", f"nach {p.get('after_errors')} Fehlversuchen", LOW, f"rec_ok:{e['id']}"
     if t == "LIMITS_WARNING":
         return "Limits widerspruechlich", str(p.get("warning"))[:300], HIGH, f"limits:{str(p.get('warning'))[:40]}"
     if t == "WHITELIST_CANDIDATE":
@@ -133,7 +138,7 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
     return None
 
 
-NOTIFY_TYPES = ["ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "MEME_TRADE_OPEN",
+NOTIFY_TYPES = ["RECONCILER_BLIND", "RECONCILER_RECOVERED", "ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "MEME_TRADE_OPEN",
                 "MEME_TRADE_CLOSE", "MEME_TRADE_PARTIAL", "MEME_LIMIT", "MEME_ERROR", "MEME_COACH_CHANGE", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
                 "BROKER_OFFLINE", "RESEARCH_FAILED", "BACKUP_FAILED", "INJECTION_SUSPECTED", "STREAM_DISCONNECTED",
                 "DESK_IDLE", "RESEARCH_DONE", "DAILY_REPORT", "HIRING_REQUEST", "PLAYBOOK_PROPOSED", "PROMOTION_CHECK"]

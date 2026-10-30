@@ -25,6 +25,11 @@ Jede Entscheidung – auch jedes Veto mit Grund – steht im Ereignisprotokoll (
 - **Einstieg** nur bei mindestens **3 von 5** Signalen: frisches Narrativ · steigendes Volumen mit mehr Käufern/Holdern ·
   Smart-Money-Käufe · saubere Holder-Verteilung · gesunde Chartstruktur (Ausbruch nach Konsolidierung oder gehaltener
   Pullback). Safety- und Risk-Veto gehen immer vor.
+- **Ohne Geldfluss kein Kauf** (`require_flow = true`): Mindestens eines von „steigendes Volumen mit mehr Käufern"
+  oder „Smart Money" muss erfüllt sein. Aufmerksamkeit allein (Boosts, Socials) reicht nicht – genau solche Käufe
+  haben in den ersten PAPER-Läufen Geld gekostet. Bezahlte Boosts und Socials zählen im Narrativ-Score kaum,
+  organische Aufmerksamkeit (GeckoTerminal-Trending, echte Käufe pro Stunde, X, Nachrichten) stark.
+  Ohne eingetragene Wallets gilt Smart Money als „nicht messbar" (nicht als „nein").
 - **Nie hinterherrennen:** > 25 % in 5 Minuten ohne Konsolidierung = kein Einstieg, warten auf Pullback/Ausbruch.
 - **Exits:** bei +100 % den Einsatz rausnehmen (Free Ride) → Stufen +200 %/+400 % je 25 % → Trailing-Stop 30 % auf
   den Rest. Harter Stop −30 %. Zeit-Stop nach 45 min ohne Bewegung (±10 %). Sofort raus bei Narrativ-/Liquiditäts-

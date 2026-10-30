@@ -95,3 +95,24 @@ def test_coach_override_is_clamped_to_bounds(tmp_path):
     cfg = logic.load_config(override=o)
     assert cfg["weights"]["narrative"] == 1.7 and cfg["weights"]["structure"] == 1.0   # 9.0 outside bounds: ignored
     assert cfg["thresholds"]["narrative_min"] == 0.4
+
+
+def test_paid_boost_and_socials_alone_are_not_a_narrative():
+    """Echte Laeufe: Narrativ war bei 100 % der Tokens 'wahr' - bezahlte Boosts + Socials sind keine Aufmerksamkeit."""
+    paid_only = {**PAIR, "buys_h1": 150, "created_ms": NOW_MS - 30 * 3.6e6}
+    score, _ = logic.narrative_score({"boost": 500, "sources": ["boost"]}, paid_only, ["DUBBLE"], now_ms=NOW_MS)
+    assert score < CFG["thresholds"]["narrative_min"]
+    organic = {**PAIR, "buys_h1": 5000}
+    score2, why = logic.narrative_score({"boost": 0, "sources": ["gecko_trending"]}, organic, ["DUBBLE"], now_ms=NOW_MS)
+    assert score2 >= CFG["thresholds"]["narrative_min"] and any("Trending" in w for w in why)
+
+
+def test_no_entry_without_money_flow():
+    """Alle 4 echten Kaeufe hatten nur Narrativ+Verteilung+Struktur, kein Volumen/Smart Money -> kein Einstieg mehr."""
+    no_flow = {**PAIR, "volume": {"m5": 1000, "h1": 60_000}}
+    sig = logic.evaluate_signals(no_flow, [], SAFE, narrative=0.9, holders_growth=None, smart_buyers=None,
+                                 candles=consolidation_breakout(), cfg=CFG)
+    assert sig["count"] >= 3 and sig["enter"] is False and sig["no_flow"] is True
+    flow = logic.evaluate_signals(PAIR, [], SAFE, narrative=0.9, holders_growth=0.05, smart_buyers=None,
+                                  candles=consolidation_breakout(), cfg=CFG)
+    assert flow["enter"] is True and flow["metrics"]["smart_buyers"] is None

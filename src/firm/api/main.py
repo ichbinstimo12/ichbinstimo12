@@ -422,6 +422,11 @@ def create_app(
         await manager.broadcast({"type": "SYSTEM", "content": "KILL SWITCH activated via dashboard."})
         return {"status": "HALTED"}
 
+    @app.get("/api/performance", dependencies=[Depends(require_token)])
+    async def performance(days: float = 30.0):
+        from src.firm.reports import performance as perf
+        return await asyncio.to_thread(perf.build, store, max(1.0, min(days, 365.0)))
+
     # ---------------- Memecoin desk ----------------
     @app.get("/api/memedesk", dependencies=[Depends(require_token)])
     async def memedesk():

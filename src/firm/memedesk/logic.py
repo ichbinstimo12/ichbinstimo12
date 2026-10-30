@@ -79,18 +79,30 @@ def safety_veto(report: Optional[Dict[str, Any]], roundtrip_loss_pct: Optional[f
 def narrative_score(token: Dict[str, Any], pair: Dict[str, Any], recent_names: List[str],
                     x_mentions: Optional[int] = None, news_hits: int = 0, now_ms: Optional[float] = None
                     ) -> Tuple[float, List[str]]:
-    """0..1: Aufmerksamkeit (Boosts, Socials, Profil, Nachrichten, X) und Frische (jung, keine Kopie-Welle)."""
+    """0..1: ORGANISCHE Aufmerksamkeit und Frische.
+
+    Echte Laeufe zeigten: bezahlte DexScreener-Boosts und vorhandene Socials treffen auf praktisch jeden gelisteten
+    Token zu (Narrativ war bei 100 % 'wahr'). Gewichtet wird deshalb, was man nicht kaufen kann: GeckoTerminal-
+    Trending (aus echter Handelsaktivitaet), Zahl der Kaeufe, Nachrichten, X-Erwaehnungen. Boost und Socials zaehlen
+    nur wenig."""
     now_ms = now_ms if now_ms is not None else time.time() * 1000
-    parts, why = [], []
-    boost = float(token.get("boost") or pair.get("boosts") or 0)
-    parts.append(min(1.0, math.log10(1 + boost) / 3)); why.append(f"Boost {boost:.0f}")
+    parts, why = [], []                       # (value, weight)
+    sources = set(token.get("sources") or [])
+    trending = 1.0 if "gecko_trending" in sources else 0.3 if "gecko_new" in sources else 0.0
+    parts.append((trending, 1.5)); why.append("organisch Trending" if trending == 1.0 else "nicht organisch trending")
+    buys = float(pair.get("buys_h1") or 0)
+    parts.append((min(1.0, math.log10(1 + buys) / math.log10(1 + 5000)), 1.0)); why.append(f"{buys:.0f} Kaeufe/h")
     socials = set(pair.get("socials") or []) | set(token.get("links") or [])
     soc = len(socials & {"twitter", "telegram", "discord"}) / 3 + (0.34 if pair.get("websites") else 0)
-    parts.append(min(1.0, soc)); why.append(f"Socials {sorted(socials)}")
+    parts.append((min(1.0, soc), 0.5))
+    boost = float(token.get("boost") or pair.get("boosts") or 0)
+    parts.append((min(1.0, math.log10(1 + boost) / 3), 0.25))
+    if boost:
+        why.append(f"bezahlter Boost {boost:.0f} (zaehlt kaum)")
     if x_mentions is not None:
-        parts.append(min(1.0, math.log10(1 + x_mentions) / 3)); why.append(f"X-Erwaehnungen {x_mentions}")
+        parts.append((min(1.0, math.log10(1 + x_mentions) / 3), 1.5)); why.append(f"X-Erwaehnungen {x_mentions}")
     if news_hits:
-        parts.append(min(1.0, news_hits / 3)); why.append(f"in {news_hits} Nachrichten")
+        parts.append((min(1.0, news_hits / 3), 1.0)); why.append(f"in {news_hits} Nachrichten")
     age_h = (now_ms - float(pair.get("created_ms") or now_ms)) / 3.6e6
     fresh = 1.0 if age_h <= 6 else 0.6 if age_h <= 24 else 0.3
     name = (pair.get("symbol") or pair.get("name") or "").lower()
@@ -99,8 +111,8 @@ def narrative_score(token: Dict[str, Any], pair: Dict[str, Any], recent_names: L
     if copies >= 3:
         fresh *= 0.4; why.append(f"durchgekaut: {copies} aehnliche Tokens")
     why.append(f"Alter {age_h:.1f} h")
-    base = sum(parts) / len(parts) if parts else 0.0
-    return round(0.6 * base + 0.4 * fresh, 3), why
+    base = sum(v * w for v, w in parts) / sum(w for _, w in parts)
+    return round(0.75 * base + 0.25 * fresh, 3), why
 
 
 # ------------------------------------------------------------------ chart structure
@@ -138,15 +150,18 @@ def evaluate_signals(pair: Dict[str, Any], safety_reasons: List[str], report: Op
     sig = {
         "narrative": narrative >= t["narrative_min"],
         "volume_holders": growth >= t["volume_growth_min"] and ratio >= t["buy_ratio_min"] and holders_up,
-        "smart_money": smart_buyers >= t["smart_wallets_min"],
+        "smart_money": smart_buyers is not None and smart_buyers >= t["smart_wallets_min"],
         "distribution": not safety_reasons and top10 <= 0.8 * cfg["safety"]["max_top10_pct"],
         "structure": struct,
     }
     score = sum(w[k] for k, v in sig.items() if v) / sum(w.values())
     count = sum(sig.values())
     chasing = vertical or float((pair.get("change") or {}).get("m5", 0)) > t["chase_m5_pct"]
-    enter = count >= int(t["min_signals"]) and not chasing and not safety_reasons
+    # Attention without money flowing in is how falling knives look: at least one flow signal is required.
+    no_flow = bool(t.get("require_flow", True)) and not (sig["volume_holders"] or sig["smart_money"])
+    enter = count >= int(t["min_signals"]) and not chasing and not safety_reasons and not no_flow
     return {"signals": sig, "count": count, "score": round(score, 3), "enter": enter, "chasing": chasing,
+            "no_flow": no_flow,
             "metrics": {"narrative": narrative, "volume_growth": round(growth, 2), "buy_ratio": round(ratio, 2),
                         "holders_growth": holders_growth, "smart_buyers": smart_buyers, "top10_pct": top10,
                         "m5_change": (pair.get("change") or {}).get("m5")},

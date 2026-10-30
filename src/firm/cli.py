@@ -403,6 +403,8 @@ async def main():
     llm_parser.add_argument("--provider", required=True, choices=["ollama", "anthropic"], help="LLM provider to use")
 
     args = parser.parse_args()
+    from src.firm.ops.runtime_env import install_loop_noise_filter
+    install_loop_noise_filter(asyncio.get_running_loop())
 
     if args.command == "run":
         # A stale halt flag must stop the run before anything is initialised.

@@ -72,6 +72,12 @@ class DailyReporter:
             "promotion": next((_p(e) for e in reversed(self.event_store.get_events(types=["PROMOTION_CHECK"], last=1))), None),
             "note": "Kennzahlen eines Tages sagen nichts ueber einen Edge aus (zu wenige Trades).",
         }
+        try:
+            from src.firm.reports import performance
+            report["performance_30d"] = performance.build(self.event_store, days=30)
+        except Exception as e:      # the daily report must never fail because of the extra section
+            logger.warning(f"Performance section skipped: {e}")
+            report["performance_30d"] = None
         return report
 
     def to_markdown(self, r: Dict[str, Any]) -> str:
@@ -93,6 +99,9 @@ class DailyReporter:
             lines += ["", f"## Skalierungs-Leiter {pr['stage']} -> {pr['next']}: {pr['passed']}/{pr['total']} Kriterien"
                       + (" (bereit - Entscheidung liegt bei dir)" if pr.get("ready") else "")]
             lines += [f"- [{'x' if c['ok'] else ' '}] {c['name']}: {c['detail']}" for c in pr["criteria"]]
+        if r.get("performance_30d"):
+            from src.firm.reports import performance
+            lines += ["", performance.to_markdown(r["performance_30d"])]
         lines += ["", r["note"]]
         return "\n".join(lines)
 

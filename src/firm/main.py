@@ -391,6 +391,12 @@ class FirmOrchestrator:
                 raise
             except Exception as e:
                 ok, error = False, f"{type(e).__name__}: {str(e)[:200]}"
+                if getattr(self.llm, "provider_name", "") == "ollama":
+                    from src.firm.ops.runtime_env import try_start_ollama
+                    if try_start_ollama(getattr(self.llm, "base_url", "")):
+                        error += " - 'ollama serve' wurde automatisch gestartet"
+                    else:
+                        error += " - Ollama starten: 'ollama serve' (oder Ollama-App oeffnen)"
             if ok != last_ok:
                 self.event_store.append("BRAIN", "LLM_STATUS", {
                     "ok": ok, "provider": getattr(self.llm, "provider_name", "?"),
@@ -419,6 +425,9 @@ class FirmOrchestrator:
         started = self.event_store.get_events(types=["RESEARCH_STARTED"], last=1)
         if requested and (not started or requested[-1]["ts"] > started[-1]["ts"]):
             return f"requested by {requested[-1].get('agent_id')}"
+        shadow = self.shadow_research_due()
+        if shadow:
+            return shadow
         if self.gate.is_stale(max_age_days * 86400):
             return "no verdicts yet" if not self.gate.created() else f"verdicts older than {max_age_days:g} days"
         wanted = research_resolutions(self.trading_desk.resolution if self.trading_desk else "MINUTE_15")
@@ -470,6 +479,31 @@ class FirmOrchestrator:
         finally:
             self._research_running = False
 
+    def shadow_promising(self) -> list:
+        """Markets whose shadow-book results (scanner signals, spread deducted) clear the evidence bar."""
+        from src.firm.research import shadow_stats
+        events = self.event_store.get_events(types=["SHADOW_RESULT"], last=5000)
+        verdicts = self.gate.overview().get("verdicts") or {}
+        return shadow_stats.promising(shadow_stats.summarize(events), verdicts)
+
+    def shadow_research_due(self) -> Optional[str]:
+        """Shadow evidence triggers research for markets not covered by the last run (at most once a day)."""
+        good = self.shadow_promising()
+        if not good:
+            return None
+        import json as _json
+        started = self.event_store.get_events(types=["RESEARCH_STARTED"], last=1)
+        if started:
+            last = started[-1]
+            from datetime import datetime as _dt
+            age = (_dt.utcnow() - _dt.fromisoformat(str(last["ts"]))).total_seconds()
+            covered = set(_json.loads(last.get("payload_json") or "{}").get("epics") or [])
+            if age < 86400 or all(g["epic"] in covered for g in good):
+                return None
+        g = good[0]
+        return (f"shadow book: {g['epic']} {g['strategy']} {g['resolution']} {g['n']} signals, "
+                f"{g['expectancy_r']:+.2f} R after spread")
+
     def scanner_candidates(self) -> list:
         """Top-K markets from the scanner's latest universe that are not on the whitelist (research only).
         More markets = more trials: the trial counter and deflated statistics in the lab account for that."""
@@ -477,11 +511,11 @@ class FirmOrchestrator:
         if k <= 0:
             return []
         ev = self.event_store.get_events(types=["UNIVERSE_UPDATED"], last=1)
-        if not ev:
-            return []
         import json as _json
-        cands = (_json.loads(ev[-1]["payload_json"] or "{}").get("candidates") or [])
-        return [c["epic"] for c in cands if c.get("epic") and c["epic"] not in self.whitelist][:k]
+        shadow = [g["epic"] for g in self.shadow_promising() if g["epic"] not in self.whitelist]
+        cands = (_json.loads(ev[-1]["payload_json"] or "{}").get("candidates") or []) if ev else []
+        ranked = list(dict.fromkeys(shadow + [c["epic"] for c in cands if c.get("epic")]))
+        return [e for e in ranked if e not in self.whitelist][:k]
 
     async def _sizing_inputs(self):
         """Real broker numbers for the minimum-size feasibility check (missing values -> check skipped)."""
@@ -691,35 +725,44 @@ class FirmOrchestrator:
         the Observe -> Think -> Act cycle through the LLM provider.
         """
         interval = float(os.getenv("FIRM_TICK_SECONDS", "15"))
-        logger.info("Agent loop started.")
+        parallel = max(1, int(os.getenv("FIRM_AGENT_PARALLEL", "4")))
+        gate = asyncio.Semaphore(parallel)
+        logger.info(f"Agent loop started (parallel, max {parallel} at once).")
         while self.is_running:
+            jobs = []
             for agent_name, config in list(self.agent_runtime.active_agents.items()):
                 if not self.is_running:
                     break
                 if config is None:
                     continue
-
                 try:
                     task = self.task_queue.next_pending(agent_name)
                 except Exception as e:
                     logger.error(f"Task claim failed for {agent_name}: {e}")
                     continue
-                if not task:
-                    continue
-
-                try:
-                    observation = self._build_observation(agent_name, task)
-                    result = await self.agent_runtime.step(agent_name, observation, task["task_id"],
-                                                           facts=self._facts(agent_name), on_action=self.handle_agent_action)
-                    self.task_queue.complete(task["task_id"], result)
-                    self._archive_task(agent_name, task, result=result)
-                    logger.info(f"Completed task {task['task_id']} for {agent_name}")
-                except Exception as e:
-                    logger.error(f"Agent {agent_name} failed task {task['task_id']}: {e}")
-                    self.task_queue.fail(task["task_id"], str(e))
-                    self._archive_task(agent_name, task, error=str(e))
-
+                if task:
+                    jobs.append(self._run_agent_task(agent_name, task, gate))
+            if jobs:
+                await asyncio.gather(*jobs)
             await asyncio.sleep(interval)
+
+    async def _run_agent_task(self, agent_name: str, task: dict, gate: asyncio.Semaphore) -> None:
+        """One agent, one task. Agents work side by side (bounded by `gate`); one slow LLM answer no longer
+        holds up the whole office. Money decisions still pass the single RiskGate in the money zone."""
+        async with gate:
+            try:
+                observation = self._build_observation(agent_name, task)
+                result = await self.agent_runtime.step(agent_name, observation, task["task_id"],
+                                                       facts=self._facts(agent_name), on_action=self.handle_agent_action)
+                self.task_queue.complete(task["task_id"], result)
+                self._archive_task(agent_name, task, result=result)
+                logger.info(f"Completed task {task['task_id']} for {agent_name}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Agent {agent_name} failed task {task['task_id']}: {e}")
+                self.task_queue.fail(task["task_id"], str(e))
+                self._archive_task(agent_name, task, error=str(e))
 
     def _archive_task(self, agent_name: str, task: dict, result=None, error: Optional[str] = None) -> None:
         """File a completed (or failed) task with the actions it produced."""

@@ -203,7 +203,8 @@ class MemeDesk:
                 self._candle_cache[pair["pair"]] = (self.now() + 60, candles)
             except Exception:
                 candles = []
-        ev = logic.evaluate_signals(pair, vetoes, report, narrative, growth, self.smart_buyers(mint), candles, self.cfg)
+        smart = self.smart_buyers(mint) if self.wallets else None      # None = no wallets configured (n/a)
+        ev = logic.evaluate_signals(pair, vetoes, report, narrative, growth, smart, candles, self.cfg)
         entry = {"mint": mint, "symbol": pair.get("symbol"), "dex": pair.get("dex"), "score": ev["score"],
                  "signals": ev["signals"], "count": ev["count"], "vetoes": vetoes, "chasing": ev["chasing"],
                  "structure": ev["structure"], "narrative_why": narrative_why[:4], "price_usd": pair.get("price_usd"),
@@ -218,7 +219,9 @@ class MemeDesk:
             return {**entry, "decision": "veto_safety"}
         if not ev["enter"]:
             why = "senkrechter Pump - warte auf Pullback/Ausbruch" if ev["chasing"] else \
-                f"nur {ev['count']} von 5 Signalen (mind. {int(self.cfg['thresholds']['min_signals'])})"
+                f"nur {ev['count']} von 5 Signalen (mind. {int(self.cfg['thresholds']['min_signals'])})" \
+                if ev["count"] < int(self.cfg["thresholds"]["min_signals"]) else \
+                "kein Geldfluss (weder Volumen/Kaeufer noch Smart Money) - Aufmerksamkeit allein reicht nicht"
             self.log("SCOUT", "MEME_SKIP", {"mint": mint, "symbol": pair.get("symbol"), "reason": why,
                                             "signals": ev["signals"]})
             return {**entry, "decision": "skip", "reason": why}

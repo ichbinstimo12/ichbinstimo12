@@ -7,12 +7,14 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from src.firm.envload import load_env
+from src.firm.ops.runtime_env import ErrorThrottle, error_kind
 
 # Load environment variables from .env file
 load_env()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("BrokerClient")
+_PRICE_ERRORS = ErrorThrottle(window_s=60.0)
 
 DEMO_BASE_URL = "https://demo-api-capital.backend-capital.com"
 LIVE_BASE_URL = "https://api-capital.backend-capital.com"
@@ -221,7 +223,10 @@ class CapitalComClient:
             data = (await self._request("GET", f"/prices/{epic}", params=params)).json()
             return data.get("prices") or []
         except Exception as e:
-            logger.error(f"Failed to get prices for {epic}: {e}")
+            suppressed = _PRICE_ERRORS.should_log(error_kind(e))
+            if suppressed is not None:
+                more = f" ({suppressed} similar errors for other markets suppressed)" if suppressed else ""
+                logger.error(f"Failed to get prices for {epic}: {e}{more}")
             return []
 
     async def get_prices_range(self, epic: str, resolution: str, date_from: str, date_to: str,

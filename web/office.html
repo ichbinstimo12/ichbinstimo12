@@ -36,6 +36,8 @@
   .metrics { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-left: auto; }
   .metric .k { display: block; font-size: 9px; letter-spacing: .14em; color: var(--dim); }
   .metric .v { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pl-up { color: var(--emerald); } .pl-down { color: var(--rose); }
+  ul.findings { margin: 0 0 8px; padding-left: 16px; font-size: 11px; color: var(--muted); }
   .metric .v.up { color: var(--emerald); } .metric .v.down { color: var(--rose); }
   .metric .v.small { font-size: 11px; }
   .kill { background: #2a0b10; color: #fecdd3; border: 1px solid #9f1239; border-radius: 8px; padding: 9px 14px;
@@ -227,6 +229,10 @@
       <div class="panel-body" style="max-height: 320px"><table id="wall"><tbody><tr><td class="empty">noch keine Forschungsurteile</td></tr></tbody></table></div>
     </section>
     <section class="panel">
+      <div class="panel-head"><h2>GELD-BILANZ</h2><span class="hint">30 Tage, nur echte Ergebnisse</span></div>
+      <div class="panel-body" id="perf" style="max-height: 320px"><div class="empty">—</div></div>
+    </section>
+    <section class="panel">
       <div class="panel-head"><h2>FREIGABEN</h2><span class="hint">nur du entscheidest</span></div>
       <div class="panel-body" id="approvals" style="max-height: 320px"><div class="empty">nichts offen</div></div>
     </section>
@@ -375,6 +381,17 @@
   async function refreshTasks() { try { state.tasks = (await api("/api/tasks")).tasks || []; renderTasks(); } catch {} }
   async function refreshLessons() { try { state.lessons = (await api("/api/lessons?limit=20")).lessons || []; renderLessons(); renderInspector(); } catch {} }
   async function refreshArchive() { try { state.archive = await api("/api/archive?limit=200"); renderArchive(); } catch {} }
+  async function refreshPerf() {
+    const box = document.getElementById("perf");
+    try {
+      const r = await api("/api/performance?days=30");
+      const rows = (r.capital.by_strategy || []).concat((r.memecoin.by_signals || []).map((g) => ({ ...g, key: "Meme: " + g.key })));
+      box.innerHTML = '<ul class="findings">' + (r.findings || []).map((f) => `<li>${esc(f)}</li>`).join("") + "</ul>" +
+        (rows.length ? '<table><tr><th>Gruppe</th><th>Trades</th><th>P&amp;L</th><th>Treffer</th></tr>' +
+          rows.map((g) => `<tr><td>${esc(g.key)}</td><td>${g.n}</td><td class="${g.pnl < 0 ? "pl-down" : "pl-up"}">${g.pnl.toFixed(4)}</td>` +
+            `<td>${Math.round(g.win_rate * 100)} %</td></tr>`).join("") + "</table>" : "");
+    } catch { box.innerHTML = '<div class="empty">OFFLINE</div>'; }
+  }
   async function refreshApprovals() {
     try { state.hiring = (await api("/api/hiring")).requests || []; } catch {}
     try { state.playbooks = await api("/api/playbooks"); } catch {}
@@ -1094,6 +1111,8 @@
   setInterval(refreshAgents, 20000);
   setInterval(refreshApprovals, 30000);
   setInterval(refreshArchive, 30000);
+  setInterval(refreshPerf, 60000);
+  refreshPerf();
   setInterval(renderInspector, 5000);
 })();
 </script>

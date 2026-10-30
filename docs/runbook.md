@@ -281,6 +281,17 @@ statt einer allgemeinen Prüfung konkrete, wechselnde Aufgaben (IDLE_WORK in `sr
 Schattenbuch auswerten, Forschung für vielversprechende Märkte anstoßen, Kosten prüfen, Hypothesen formulieren,
 Lehrstoff fürs Fallbuch. Gehandelt wird weiterhin nur mit Forschungsfreigabe.
 
+Hat das Schattenbuch für einen Markt genug Belege (≥ 30 Signale, ≥ +0.10 R nach Spread, t ≥ 1.5, noch kein PASS),
+startet die Forschung für diesen Markt automatisch (höchstens 1×/Tag). Wo die Firma Geld verdient oder verliert:
+Dashboard-Panel „GELD-BILANZ", `GET /api/performance?days=30`, Abschnitt im Tagesbericht.
+
+### Dauerlauf-Schalter (.env)
+| Variable | Standard | Wirkung |
+|---|---|---|
+| `FIRM_KEEP_AWAKE` | 1 | Windows geht nicht in den Energiesparmodus, solange die Firma läuft |
+| `FIRM_AGENT_PARALLEL` | 4 | so viele Agenten arbeiten gleichzeitig (lokales Ollama langsam → 1 oder 2) |
+| `FIRM_OLLAMA_AUTOSTART` | 1 | startet `ollama serve`, wenn Ollama lokal nicht erreichbar und installiert ist |
+
 ## 6. Docker / 24/7-Server
 
 Schritt-für-Schritt: **docs/deploy_vps.md**. Kurz: `./scripts/firmctl.sh start | status | logs | halt | resume |
@@ -300,7 +311,9 @@ erreichbar) und startet nach `resume` von selbst wieder. Benachrichtigungen aufs
 - **Limits widersprüchlich:** Ereignis LIMITS_WARNING beim Start und in `firm doctor` (z. B. Tagesverlust-Grenze
   kleiner als das Risiko je Trade).
 - **Nachrichtenquelle sperrt/fällt aus:** Quelle wird mit wachsender Pause übersprungen; der Rest läuft weiter.
-- **Broker down:** Mock-Fallback / Reconciler-Alarm → Kill-Switch prüfen.
+- **Broker down / Internet weg:** Mock-Fallback / Reconciler-Alarm → Kill-Switch prüfen. Nach 5 fehlgeschlagenen
+  Abgleichen in Folge: Ereignis RECONCILER_BLIND (Handy), bei Erholung RECONCILER_RECOVERED. Preisfehler werden
+  während eines Ausfalls nur 1×/min mit Zähler geloggt.
 - **Absturz mitten in einem Task:** beim nächsten Start via `requeue_stale()`
   wieder aufgenommen.
 - **Events:** SQLite Event-Store (WAL) – immutable, append-only.

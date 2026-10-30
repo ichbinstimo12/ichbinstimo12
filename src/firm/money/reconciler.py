@@ -18,6 +18,7 @@ class Reconciler:
         self.event_store = event_store
         self.interval = interval
         self.is_running = False
+        self.consecutive_errors = 0
 
     def _calculate_internal_positions(self) -> Dict[str, float]:
         """
@@ -147,10 +148,30 @@ class Reconciler:
         while self.is_running:
             try:
                 await self.reconcile_once(on_mismatch)
+                self._record_success()
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
-                logger.error(f"Reconciler loop error: {e}")
+                self._record_error(e)
 
             await asyncio.sleep(self.interval)
+
+    ALARM_AFTER = 5     # consecutive failed comparisons -> RECONCILER_BLIND alarm (book cannot be verified)
+
+    def _record_error(self, e: Exception) -> None:
+        self.consecutive_errors += 1
+        n = self.consecutive_errors
+        logger.error(f"Reconciler loop error ({n} in a row): {e}")
+        if n == self.ALARM_AFTER:
+            self.event_store.append("RECONCILER", "RECONCILER_BLIND", {
+                "consecutive_errors": n, "error": str(e)[:300],
+                "note": "Positionen koennen nicht mit dem Broker abgeglichen werden - Broker/Internet pruefen"})
+
+    def _record_success(self) -> None:
+        if self.consecutive_errors >= self.ALARM_AFTER:
+            self.event_store.append("RECONCILER", "RECONCILER_RECOVERED", {"after_errors": self.consecutive_errors})
+            logger.info(f"Reconciler recovered after {self.consecutive_errors} failed comparisons.")
+        self.consecutive_errors = 0
 
     def stop(self):
         self.is_running = False

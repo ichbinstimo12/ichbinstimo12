@@ -162,6 +162,8 @@ class Supervisor:
 
     async def run(self) -> int:
         self.children = self.plan()
+        from src.firm.ops.runtime_env import keep_awake
+        keep_awake()
         logger.info("Starting zones: " + ", ".join(c.name for c in self.children))
         # docker stop / systemd send SIGTERM: stop the zones in order instead of dying and orphaning them.
         import signal

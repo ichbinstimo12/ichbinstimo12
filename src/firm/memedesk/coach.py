@@ -36,12 +36,13 @@ def would_enter(metrics: Dict[str, Any], signals: Dict[str, bool], th: Dict[str,
         "volume_holders": float(metrics.get("volume_growth") or 0) >= th["volume_growth_min"]
         and float(metrics.get("buy_ratio") or 0) >= th["buy_ratio_min"]
         and (metrics.get("holders_growth") is None or float(metrics["holders_growth"]) > 0),
-        "smart_money": int(metrics.get("smart_buyers") or 0) >= th["smart_wallets_min"],
+        "smart_money": metrics.get("smart_buyers") is not None and int(metrics["smart_buyers"]) >= th["smart_wallets_min"],
         "distribution": bool(signals.get("distribution")),
         "structure": bool(signals.get("structure")),
     }
     chasing = float(metrics.get("m5_change") or 0) > th["chase_m5_pct"]
-    return sum(sig.values()) >= int(th["min_signals"]) and not chasing
+    no_flow = bool(th.get("require_flow", True)) and not (sig["volume_holders"] or sig["smart_money"])
+    return sum(sig.values()) >= int(th["min_signals"]) and not chasing and not no_flow
 
 
 def backtest(trades: List[Dict[str, Any]], th: Dict[str, float]) -> Tuple[int, Optional[float]]:
