@@ -101,11 +101,8 @@ def test_sigterm_stops_children_in_order_and_marks_termination(tmp_path):
     assert sup.terminated and sup._stopped.is_set() and all(c.proc.returncode is not None for c in sup.children)
 
 
-def test_memecoin_desk_zone_gets_only_its_own_keys(tmp_path):
+def test_retired_memecoin_keys_reach_no_zone(tmp_path):
     kids = _plan(tmp_path, FIRM_MCP="0", SOLANA_RPC_URL="https://rpc.example/?api-key=secret", X_BEARER_TOKEN="xt")
-    meme = kids["meme"].env
-    assert meme["SOLANA_RPC_URL"].startswith("https://rpc.example") and meme["X_BEARER_TOKEN"] == "xt"
-    assert not any(k.startswith(("CAPITAL_", "CAP_", "ANTHROPIC_", "NOTIFY_")) for k in meme)
-    for other in ("money", "brain", "api"):
-        assert "SOLANA_RPC_URL" not in kids[other].env and "X_BEARER_TOKEN" not in kids[other].env
-    assert "meme" not in _plan(tmp_path, FIRM_MCP="0", FIRM_MEMEDESK="0")
+    assert "meme" not in kids
+    for child in kids.values():
+        assert "SOLANA_RPC_URL" not in child.env and "X_BEARER_TOKEN" not in child.env

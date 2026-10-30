@@ -1,6 +1,0 @@
-# Smart-Money- und KOL-Wallets fuer den Wallet-Tracker (oeffentliche Adressen, keine Schluessel!).
-# Trage hier Wallets ein, deren Handel du fuer profitabel haeltst (z. B. aus GMGN/Cielo/Kolscan recherchiert).
-# Der Tracker misst ihre Treffer selbst mit (Journal) - eine Wallet ist nicht "smart", nur weil sie hier steht.
-wallets = [
-  # { address = "WalletAdresseHier", label = "KOL Name", note = "Quelle der Einschaetzung" },
-]

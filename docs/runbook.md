@@ -138,7 +138,7 @@ Start -> Broker-Login (Retry, kein stiller Mock) -> Forschungslauf, falls kein U
   `FIRM_RESEARCH_DAYS` Tage oder auf Anfrage eines Agenten (max. 1x/24 h).
   Von Hand: `python scripts/research_run.py --days 365`.
 - **Strategie-Tor:** PASS = volles Risiko, FORWARD_TEST = Demo/halbes Risiko,
-  EXPLORE = Demo/Viertel-Risiko (`FIRM_DEMO_EXPLORE=0` schaltet ab). Im LIVE-Modus nur PASS.
+  EXPLORE (nicht signifikante Strategien) ist standardmaessig AUS; `FIRM_DEMO_EXPLORE=1` erlaubt es auf Demo mit Viertel-Risiko. Im LIVE-Modus nur PASS.
   Urteil fuer andere Kerzen als `FIRM_TRADE_RESOLUTION` = kein Handel (mit Begruendung).
 - **Kill-Kriterien:** je Markt+Strategie auf echten R-Werten (6 Verluste in Folge,
   Live-DD >= 10 R, Erwartungswert <= -0.3 R nach 20 Trades) -> `STRATEGY_STOPPED`, gesperrt
@@ -158,7 +158,7 @@ FIRM_TRADING=0              # Desk komplett aus (nur Analyse/Agenten)
 FIRM_TRADE_SECONDS=180      # Scan-Intervall (Default 180 s; ausgewertet wird je abgeschlossener Kerze)
 FIRM_TRADE_RESOLUTION=HOUR  # MUSS zur Forschung passen
 FIRM_RESEARCH_DAYS=7
-FIRM_DEMO_EXPLORE=1
+FIRM_DEMO_EXPLORE=0
 FIRM_MCP=1
 FIRM_MAX_API_ERRORS=10         # API-Fehlerlimit ...
 FIRM_API_ERROR_WINDOW_MIN=30   # ... innerhalb dieses Fensters -> keine neuen Orders

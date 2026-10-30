@@ -81,20 +81,6 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
         return "Neuer Markt hat die Pruefung bestanden", f"{p.get('epic')}: {p.get('verdict')} mit {p.get('strategy')} " \
             f"({p.get('resolution')}). Zum Handeln in config/whitelist.toml eintragen - deine Entscheidung.", NORMAL, \
             f"wl:{p.get('epic')}"
-    if t == "MEME_TRADE_OPEN":
-        return "Memecoin gekauft", f"{p.get('symbol')} ({p.get('mode')}): {str(p.get('reason'))[:160]}" + \
-            (f" · {p.get('size_sol')} SOL" if amounts else ""), NORMAL, f"meme_open:{e['id']}"
-    if t in ("MEME_TRADE_CLOSE", "MEME_TRADE_PARTIAL"):
-        res = f"{_num(p.get('pnl_pct'))} %" if p.get("pnl_pct") is not None else ""
-        return ("Memecoin verkauft" if t == "MEME_TRADE_CLOSE" else "Memecoin Teilverkauf"), \
-            f"{p.get('symbol')}: {p.get('reason')} {res}".strip(), NORMAL, f"meme_close:{e['id']}"
-    if t == "MEME_LIMIT":
-        return "MEMECOIN-DESK LIMIT", f"{p.get('limit')}: {p.get('action')}", HIGH, f"meme_limit:{p.get('limit')}"
-    if t == "MEME_ERROR":
-        return "Memecoin-Desk Fehler", str(p.get("error"))[:200], LOW, "meme_error"
-    if t == "MEME_COACH_CHANGE":
-        return "Memecoin-Coach: neue Parameter", f"Version {p.get('version')}: {str(p.get('diff'))[:200]}", NORMAL, \
-            f"meme_coach:{p.get('version')}"
     if t == "ACCOUNT_BOUND":
         return "Konto erkannt", f"{p.get('account')} (Hoechststand/Tagesstart neu)", NORMAL, f"acct:{p.get('account')}"
     if t == "CIRCUIT_BREAKER":
@@ -138,8 +124,7 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
     return None
 
 
-NOTIFY_TYPES = ["RECONCILER_BLIND", "RECONCILER_RECOVERED", "ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "MEME_TRADE_OPEN",
-                "MEME_TRADE_CLOSE", "MEME_TRADE_PARTIAL", "MEME_LIMIT", "MEME_ERROR", "MEME_COACH_CHANGE", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
+NOTIFY_TYPES = ["RECONCILER_BLIND", "RECONCILER_RECOVERED", "ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
                 "BROKER_OFFLINE", "RESEARCH_FAILED", "BACKUP_FAILED", "INJECTION_SUSPECTED", "STREAM_DISCONNECTED",
                 "DESK_IDLE", "RESEARCH_DONE", "DAILY_REPORT", "HIRING_REQUEST", "PLAYBOOK_PROPOSED", "PROMOTION_CHECK"]
 

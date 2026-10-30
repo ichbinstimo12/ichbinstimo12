@@ -1,6 +1,6 @@
 """Wo verdient, wo verliert die Firma Geld? - ausschliesslich aus echten Ereignissen berechnet.
 
-Quellen: TRADE_RESULT (Capital.com-Desk, P&L aus Kontostand), MEME_TRADE_CLOSE (Memecoin-Desk, PAPER/LIVE),
+Quellen: TRADE_RESULT (Capital.com-Desk, P&L aus Kontostand),
 SHADOW_RESULT (nicht gehandelte Scanner-Signale, Spread abgezogen) und TRADE_REJECTED (was das RiskGate abgelehnt hat).
 Befunde werden erst ab MIN_N Trades je Gruppe formuliert - darunter steht nur die Zahl. Keine Prognose.
 """
@@ -40,21 +40,10 @@ def _group(rows: Iterable[Dict[str, Any]], key, pnl_key: str, r_key: Optional[st
     return sorted(out, key=lambda g: g["pnl"])
 
 
-def _combo(r: Dict[str, Any]) -> str:
-    on = sorted(k for k, v in (r.get("signals") or {}).items() if v)
-    return "+".join(on) or "keine"
-
-
-def _exit_kind(r: Dict[str, Any]) -> str:
-    reason = str(r.get("reason") or "?")
-    return reason.split(":")[0].split(" bei ")[0].split(" -")[0].strip()[:40]
-
-
 def build(event_store, days: float = 30.0) -> Dict[str, Any]:
     since = (datetime.utcnow() - timedelta(days=days)).isoformat()
     ev = lambda types: event_store.get_events(types=types, after_ts=since)
     trades = [_p(e) for e in ev(["TRADE_RESULT"])]
-    meme = [_p(e) for e in ev(["MEME_TRADE_CLOSE"])]
     shadow = shadow_stats.summarize(ev(["SHADOW_RESULT"]))
     solid_shadow = [g for g in shadow if g["n"] >= MIN_N]
     rejected = Counter(str(_p(e).get("reason") or "?")[:80] for e in ev(["TRADE_REJECTED"]))
@@ -66,13 +55,6 @@ def build(event_store, days: float = 30.0) -> Dict[str, Any]:
             "by_strategy": _group(trades, lambda t: t.get("strategy") or "?", "pnl", "r"),
             "by_market": _group(trades, lambda t: t.get("epic") or "?", "pnl", "r"),
             "by_lane": _group(trades, lambda t: t.get("lane") or "?", "pnl", "r"),
-        },
-        "memecoin": {
-            "trades": len(meme),
-            "pnl_sol": round(sum(float(m["pnl_sol"]) for m in meme if isinstance(m.get("pnl_sol"), (int, float))), 6)
-            if meme else None,
-            "by_signals": _group(meme, _combo, "pnl_sol"),
-            "by_exit": _group(meme, _exit_kind, "pnl_sol"),
         },
         "shadow": {"groups": len(shadow),
                    "best": sorted(solid_shadow, key=lambda g: -g["expectancy_r"])[:8],
@@ -103,8 +85,7 @@ def findings(r: Dict[str, Any]) -> List[str]:
     out: List[str] = []
     for label, groups, unit in (("Strategie", r["capital"]["by_strategy"], ""),
                                 ("Markt", r["capital"]["by_market"], ""),
-                                ("Memecoin-Signale", r["memecoin"]["by_signals"], " SOL"),
-                                ("Memecoin-Ausstieg", r["memecoin"]["by_exit"], " SOL")):
+                                ("Lane", r["capital"]["by_lane"], "")):
         solid = [g for g in groups if g["n"] >= MIN_N]
         if not solid:
             continue
@@ -137,8 +118,6 @@ def to_markdown(r: Dict[str, Any]) -> str:
     lines += [f"- {f}" for f in r["findings"]]
     lines += ["", "### Capital.com nach Strategie"] + table(r["capital"]["by_strategy"], "")
     lines += ["", "### Capital.com nach Markt"] + table(r["capital"]["by_market"], "")
-    lines += ["", "### Memecoin-Desk nach Signal-Kombination"] + table(r["memecoin"]["by_signals"], " SOL")
-    lines += ["", "### Memecoin-Desk nach Ausstiegsgrund"] + table(r["memecoin"]["by_exit"], " SOL")
     lines += ["", "### Schattenbuch (nicht gehandelt, Spread abgezogen)"]
     best = r["shadow"]["best"]
     lines += [f"- {g['epic']} {g['strategy']} {g['resolution']}: {g['n']} Signale, {g['expectancy_r']:+.2f} R, "

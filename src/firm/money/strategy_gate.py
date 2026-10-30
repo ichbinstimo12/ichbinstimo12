@@ -3,7 +3,7 @@
 Die Forschungspipeline (automatisch oder scripts/research_run.py) schreibt data/strategy_verdicts.json.
   PASS          -> normales Risiko (Demo und Live)
   FORWARD_TEST  -> nur Demo, halbes Risiko
-  EXPLORE       -> nur Demo UND nur wenn FIRM_DEMO_EXPLORE nicht abgeschaltet ist, Viertel-Risiko.
+  EXPLORE       -> AUS (Standard). Nur Demo und nur mit FIRM_DEMO_EXPLORE=1, Viertel-Risiko.
                    Positiver, aber nicht signifikanter Out-of-Sample-Erwartungswert. Zweck: Vorwaertsdaten sammeln.
 In einem LIVE*-Modus ist alles ausser PASS gesperrt, unabhaengig davon, was der Broker-Client meldet.
 """
@@ -24,7 +24,7 @@ def trading_style() -> str:
 
 
 def _explore_enabled() -> bool:
-    return os.getenv("FIRM_DEMO_EXPLORE", "1").strip().lower() not in ("0", "false", "no", "off")
+    return os.getenv("FIRM_DEMO_EXPLORE", "0").strip().lower() not in ("0", "false", "no", "off")
 
 
 class StrategyGate:

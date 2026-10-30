@@ -209,8 +209,6 @@ async def _run_zone(args) -> int:
         return 0
     if args.name == "notify":
         return await _run_notify()
-    if args.name == "meme":
-        return await _run_meme()
     if HALT_FILE.exists():
         logger.error("Halt flag active - zone %s not started.", args.name)
         return 0
@@ -256,64 +254,6 @@ async def _wait_while_halted(args) -> bool:
         return False
     logger.info("Halt flag removed - starting the firm again.")
     return True
-
-
-async def _run_meme() -> int:
-    """Memecoin desk zone (PAPER by default). Halt flag of the firm stops it too."""
-    import signal
-    from src.firm.bus.event_store import EventStore
-    from src.firm.memedesk.desk import MemeDesk
-    from src.firm.memedesk.logic import load_config
-    from src.firm.memedesk.sources import MemeSources
-    stop = asyncio.Event()
-    with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
-        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
-    cfg = load_config(override=Path("data/memedesk/params_current.json"))
-    src = MemeSources(cfg)
-    desk = MemeDesk(src, EventStore(os.getenv("FIRM_DB_PATH", "firm_events.db")), cfg=cfg)
-    try:
-        await desk.run(lambda: not stop.is_set() and not HALT_FILE.exists())
-    finally:
-        desk.save()
-        await src.close()
-    return 0
-
-
-def _meme_command(args) -> int:
-    """meme status | kill | resume | coach | live  (operator commands for the memecoin desk)."""
-    from src.firm.bus.event_store import EventStore
-    from src.firm.memedesk import live_gate
-    from src.firm.memedesk.logic import load_config, load_limits
-    data = Path("data/memedesk")
-    store = EventStore(os.getenv("FIRM_DB_PATH", "firm_events.db"))
-    if args.action == "kill":
-        data.mkdir(parents=True, exist_ok=True)
-        (data / "halt").write_text(datetime.utcnow().isoformat(), encoding="utf-8")
-        store.append("OPERATOR", "MEME_KILL_REQUESTED", {"source": "cli"})
-        print("Kill-Switch gesetzt: der Memecoin-Desk schliesst alle Positionen und stoppt.")
-    elif args.action == "resume":
-        (data / "halt").unlink(missing_ok=True)
-        st = data / "state.json"
-        if st.exists():
-            state = json.loads(st.read_text(encoding="utf-8"))
-            state["halted"] = None
-            st.write_text(json.dumps(state, indent=1), encoding="utf-8")
-        store.append("OPERATOR", "MEME_RESUMED", {"source": "cli"})
-        print("Memecoin-Desk freigegeben (Kill-Switch/Drawdown-Stopp aufgehoben).")
-    elif args.action == "coach":
-        from src.firm.memedesk.coach import run_coach
-        res = run_coach(load_config(override=data / "params_current.json"), Path("archiv/memedesk/journal.jsonl"),
-                        data, store)
-        print(json.dumps(res, indent=1, default=str))
-    elif args.action == "live":
-        ok, why = live_gate.check(Path("archiv/memedesk/journal.jsonl"), load_limits(), data / "state.json")
-        store.append("OPERATOR", "MEME_MODE_REQUEST", {"mode": "LIVE", "granted": False, "reason": why})
-        print(("Kriterien erfuellt, aber " if ok else "LIVE nicht freigeschaltet: ") + why)
-        return 1
-    else:
-        st = data / "state.json"
-        print(st.read_text(encoding="utf-8") if st.exists() else "Memecoin-Desk hat noch keinen Zustand (noch nicht gestartet).")
-    return 0
 
 
 async def _run_notify() -> int:
@@ -370,7 +310,7 @@ async def main():
 
     # 'zone' - one isolated process, started by the supervisor
     zone_parser = subparsers.add_parser("zone", help="(intern) eine isolierte Zone; startet der Supervisor")
-    zone_parser.add_argument("name", choices=["money", "brain", "api", "notify", "meme"])
+    zone_parser.add_argument("name", choices=["money", "brain", "api", "notify"])
     zone_parser.add_argument("--mode", default=os.getenv("FIRM_MODE", "PAPER"))
     zone_parser.add_argument("--host", default="127.0.0.1")
     zone_parser.add_argument("--port", type=int, default=8000)
@@ -381,8 +321,6 @@ async def main():
     eval_parser.add_argument("--scenario", default=None)
 
     subparsers.add_parser("notify-test", help="Testnachricht an ntfy/Telegram senden und Healthcheck pingen")
-    meme_parser = subparsers.add_parser("meme", help="Memecoin-Desk: status | kill | resume | coach | live")
-    meme_parser.add_argument("action", choices=["status", "kill", "resume", "coach", "live"], nargs="?", default="status")
 
     # 'halt' / 'resume'
     subparsers.add_parser("halt", help="Emergency halt of all operations (kill switch + stop)")
@@ -472,17 +410,11 @@ async def main():
         notify_stop = asyncio.Event()
         notify_task = (asyncio.create_task(notifier.run(orchestrator.event_store, HALT_FILE, stop=notify_stop))
                        if notifier.configured else None)
-        meme_task = (asyncio.create_task(_run_meme())
-                     if os.getenv("FIRM_MEMEDESK", "1").strip().lower() not in ("0", "false", "no", "off") else None)
         try:
             await orchestrator.start(mode=args.mode)
         except KeyboardInterrupt:
             logger.info("Shutting down via KeyboardInterrupt...")
         finally:
-            if meme_task is not None:
-                meme_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await meme_task
             if notify_task is not None:
                 notify_stop.set()
                 with contextlib.suppress(asyncio.TimeoutError, Exception):
@@ -527,8 +459,6 @@ async def main():
     elif args.command == "zone":
         return await _run_zone(args)
 
-    elif args.command == "meme":
-        return _meme_command(args)
 
     elif args.command == "notify-test":
         return await _notify_test()

@@ -5,7 +5,6 @@
   mcp    capitalcom-mcp als lokaler HTTP-Dienst (127.0.0.1), Demo-Schluessel, Trading serverseitig AUS
   brain  Agenten, Scheduler, LLM -> OHNE Broker-Schluessel (auch .env wird nicht gelesen)
   api    Dashboard -> ohne Broker- und LLM-Schluessel
-  meme   Memecoin-Desk (Solana, PAPER): eigenes Kapital, nur Solana-/X-Schluessel, keine Broker-/LLM-Schluessel
   notify Handy-Benachrichtigungen + Totmannschalter-Ping (nur wenn NOTIFY_*/HEALTHCHECK_PING_URL gesetzt)
          -> ohne Broker- und LLM-Schluessel; die Benachrichtigungs-Tokens kennt nur dieser Prozess
 
@@ -31,7 +30,7 @@ logger = logging.getLogger("Supervisor")
 BROKER_KEYS = ("CAPITAL_", "CAP_")
 LLM_KEYS = ("ANTHROPIC_",)
 NOTIFY_KEYS = ("NOTIFY_", "HEALTHCHECK_")
-MEME_KEYS = ("SOLANA_", "X_BEARER_TOKEN", "BIRDEYE_", "MEMEDESK_")   # only the memecoin desk zone sees these
+RETIRED_KEYS = ("SOLANA_", "X_BEARER_TOKEN", "BIRDEYE_", "MEMEDESK_")   # removed memecoin desk: no zone sees these
 ALWAYS_DROP = ("FIRM_API_TOKEN",)
 
 
@@ -76,8 +75,8 @@ class Supervisor:
         py = [sys.executable, "-m", "src.firm"]
         mode_env = {"FIRM_MODE": self.mode}
         kids: List[Child] = [Child("money", py + ["zone", "money", "--mode", self.mode],
-                                   {**filtered_env(self.base_env, LLM_KEYS + NOTIFY_KEYS + MEME_KEYS), **mode_env}, critical=True)]
-        brain_env = {**filtered_env(self.base_env, BROKER_KEYS + NOTIFY_KEYS + MEME_KEYS), **mode_env}
+                                   {**filtered_env(self.base_env, LLM_KEYS + NOTIFY_KEYS + RETIRED_KEYS), **mode_env}, critical=True)]
+        brain_env = {**filtered_env(self.base_env, BROKER_KEYS + NOTIFY_KEYS + RETIRED_KEYS), **mode_env}
         mcp = self._mcp_child()
         if mcp is not None:
             kids.append(mcp)
@@ -87,15 +86,11 @@ class Supervisor:
         kids.append(Child("brain", py + ["zone", "brain", "--mode", self.mode], brain_env))
         if self.dashboard:
             kids.append(Child("api", py + ["zone", "api", "--host", self.host, "--port", str(self.port)],
-                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + NOTIFY_KEYS + MEME_KEYS, keep_api_token=True),
+                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + NOTIFY_KEYS + RETIRED_KEYS, keep_api_token=True),
                                **mode_env}))
         if self.notify_configured():
             kids.append(Child("notify", py + ["zone", "notify"],
-                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + MEME_KEYS), **mode_env}))
-        if self.base_env.get("FIRM_MEMEDESK", "1").strip().lower() not in ("0", "false", "no", "off"):
-            # Memecoin desk: own process, own (paper) capital, no access to the firm's broker or LLM keys
-            kids.append(Child("meme", py + ["zone", "meme"],
-                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + NOTIFY_KEYS), **mode_env}))
+                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + RETIRED_KEYS), **mode_env}))
         return kids
 
     def notify_configured(self) -> bool:
