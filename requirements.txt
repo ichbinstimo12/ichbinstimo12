@@ -15,3 +15,4 @@ capitalcom-mcp==0.3.4  # Capital.com MCP server (github.com/SimonTarara62/capita
 pytest
 pytest-asyncio
 truststore>=0.10  # TLS against the OS certificate store (antivirus/proxy certificates on Windows)
+fpdf2>=2.8          # Studio: fertige PDF-Datei je Produkt (ohne: nur HTML)

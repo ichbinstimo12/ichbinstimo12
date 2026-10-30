@@ -13,7 +13,9 @@ Zahlen siehst.
 | Produkt schreiben | StudioBuilder (KI) | vollständiges Produkt in Markdown (Checkliste, Planer, Kurz-Guide …) |
 | Prüfung 1 | Code | Länge, Struktur, Preis, verbotene Versprechen („garantiert", „reich werden", Anlage-/Steuer-/Medizinrat), fremde Marken, Platzhalter, persönliche Daten, Links |
 | Prüfung 2 | StudioAuditor (KI, Red Team) | Fehler, Füllstoff, Nutzen, irreführende Aussagen; Score ≥ 7/10 nötig. Ein Überarbeitungsversuch, dann Schluss |
-| Shop-Text + Paket | StudioBuilder + Code | Titel, Beschreibung, Schlagworte; druckfertige HTML-Datei, Upload-Anleitung, KI-Hinweis |
+| Shop-Text + Paket | StudioBuilder + Code | Titel, Beschreibung, Schlagworte; **fertiges PDF** (keine Handarbeit), HTML, Upload-Anleitung, KI-Hinweis |
+| Marketing-Paket | StudioBuilder + Code | 3–4 ehrliche Posts für **deine** Kanäle (Versprechen, Marken, Links werden vom Code aussortiert), Video-Ideen, **Gratis-Leseprobe als PDF** (~250 Wörter). Die Firma postet nie selbst |
+| Ladenhüter melden | Code | veröffentlicht seit 45 Tagen ohne Verkauf → Handy-Meldung mit Vorschlag (einmal je Produkt) |
 | Verkäufe lesen | Studio-Zone (Code) | alle 30 min aus dem Shop (nur lesen), jeder Verkauf genau einmal, Rückerstattungen separat |
 | Schatzkammer | Code | täglich: Umsatz, KI-Kosten, Gewinn, Rücklagen, Empfehlung |
 
@@ -23,7 +25,7 @@ Pause wenn 5 bei dir warten, höchstens 10 USD KI-Kosten pro Monat fürs Studio,
 ## Was du tust (ca. 10 Minuten pro Produkt)
 
 1. Handy-Meldung „Neues Produkt wartet auf Freigabe" → Dashboard → **STUDIO** → **PAKET** herunterladen und
-   `product.html` lesen. Gut? **FREIGEBEN**. Nicht gut? **ABLEHNEN** (mit kurzem Grund).
+   `product.pdf` lesen. Gut? **FREIGEBEN**. Nicht gut? **ABLEHNEN** (mit kurzem Grund).
 2. Freigegebenes Produkt hochladen (Anleitung `UPLOAD.md` im Paket), dann **VEROEFFENTLICHT** klicken und die
    Produkt-ID aus dem Shop eintragen – damit die Firma Verkäufe zuordnen kann.
 3. Kommt eine Schatzkammer-Empfehlung („X USD aufs Trading-Konto"): selbst überweisen und **UEBERWEISUNG
@@ -95,8 +97,9 @@ Auszahlungen (CLAUDE.md, Prinzip 5). Sie rechnet und empfiehlt.
 
 ## WIE KÖNNTE DAS SCHEITERN?
 
-- **Niemand kauft.** Gumroad bringt kaum eigene Besucher. Ohne Reichweite (z. B. ein Kanal, den du ohnehin nutzt)
-  bleiben die Verkäufe bei null. Das Studio kann keine Werbung machen und tut es bewusst nicht (Spam-Risiko).
+- **Niemand kauft.** Gumroad bringt kaum eigene Besucher. Ohne Reichweite bleiben die Verkäufe bei null. Deshalb
+  liefert jedes Paket fertige Posts und eine Gratis-Leseprobe – teilen musst du sie selbst (automatisches Posten
+  wäre Spam und kostet Konten).
 - **Qualität:** KI-Produkte können Fehler enthalten. Zwei Prüfungen + deine Freigabe senken das Risiko, schliessen
   es nicht aus. Lies jedes Produkt, bevor du freigibst.
 - **Kosten > Umsatz:** Mit Ollama kostet das Studio nichts. Mit Claude ist es auf 10 USD/Monat begrenzt.

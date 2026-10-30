@@ -60,10 +60,11 @@ def test_package_has_files_ai_note_and_escapes_html(tmp_path):
                                                    "listing": {"description": "Kurz", "tags": ["lehre"]}})
     folder = package.build(p, tmp_path / "pkg")
     names = sorted(f.name for f in folder.iterdir())
-    assert names == ["UPLOAD.md", "listing.txt", "product.html", "product.md"]
+    assert names == ["UPLOAD.md", "listing.txt", "product.html", "product.md", "product.pdf"]
+    assert (folder / "product.pdf").read_bytes()[:5] == b"%PDF-" and "product.pdf ist fertig" in (folder / "UPLOAD.md").read_text(encoding="utf-8")
     html_text = (folder / "product.html").read_text(encoding="utf-8")
-    assert "<script>" not in html_text and "KI-Unterstuetzung" in html_text and "<table>" in html_text
-    assert "KI-Unterstuetzung" in (folder / "listing.txt").read_text(encoding="utf-8")
+    assert "<script>" not in html_text and "KI-Unterstützung" in html_text and "<table>" in html_text
+    assert "KI-Unterstützung" in (folder / "listing.txt").read_text(encoding="utf-8")
     z = zipfile.ZipFile(io.BytesIO(package.zip_bytes(folder)))
     assert sorted(z.namelist()) == names
 
@@ -78,3 +79,9 @@ def test_limits_default_and_ceiling(tmp_path):
     t.write_text("[policy]\ntax_reserve_pct = 5\ntrading_topup_pct = -1\n")
     tr = load_treasury(t)
     assert tr["tax_reserve_pct"] == 0.9 and tr["trading_topup_pct"] == 0.0
+
+
+def test_pdf_survives_umlauts_typography_and_long_words(tmp_path):
+    md = "# Lernplan für Lehrlinge – „Prüfung“ ✓\n\n## Übersicht\n- [ ] Größe…\n" + "Donaudampfschifffahrtsgesellschaftskapitän" * 8 + "\n| a | b |\n|---|---|\n| ü | € |\n"
+    assert package.markdown_to_pdf(md, "Lernplan", "Hinweis", tmp_path / "x.pdf")
+    assert (tmp_path / "x.pdf").stat().st_size > 800

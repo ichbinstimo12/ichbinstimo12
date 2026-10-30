@@ -25,6 +25,8 @@ logger = logging.getLogger("Studio")
 
 RESEARCHER, BUILDER, AUDITOR = "StudioResearcher", "StudioBuilder", "StudioAuditor"
 MAX_REVISIONS = 1
+MAX_DRAFT_FAILURES = 3       # leerer Entwurf so oft -> Idee wird aufgegeben
+IDEA_BACKOFF = timedelta(hours=1)   # nach ungueltiger/doppelter Idee: so lange keine neue (spart Tokens)
 EXPLORE_EVERY = 3            # jede 3. Idee in einer wenig getesteten Nische, sonst die mit dem meisten Umsatz
 
 IDEA_SYSTEM = """You are the market researcher of a tiny digital-products studio. You propose ONE practical digital
@@ -47,6 +49,55 @@ LISTING_SYSTEM = """You write an honest shop listing for a digital product. No h
 JSON object only: {"title": str (max 70 chars), "description": str (max 600 chars), "tags": [max 8 short tags]}"""
 
 
+def _num(v: Any) -> Optional[float]:
+    try:
+        return float(str(v).split("/")[0].strip())
+    except (TypeError, ValueError):
+        return None
+
+
+MARKETING_SYSTEM = """You help the creator tell people about a digital product on their OWN social channels. Write honest,
+helpful short posts that give real value first (one concrete tip from the product), then mention the product.
+No hype, no fake scarcity, no fake reviews or numbers, no income/success promises, no brand names, no links.
+Answer with ONE JSON object only: {"posts": [{"channel": "TikTok/Instagram caption" | "WhatsApp/Status" |
+"LinkedIn" | "Forum/Community", "text": str (max 400 chars)}] (3-4 posts), "hooks": [3 short video/post ideas]}"""
+
+SAMPLE_WORDS = 250
+
+
+def sample_excerpt(body: str, words: int = SAMPLE_WORDS) -> str:
+    """Kostenlose Leseprobe: der Anfang des Produkts bis ~words Woerter, an einer Zeilengrenze abgeschnitten."""
+    out, n = [], 0
+    for line in body.splitlines():
+        w = checks.word_count(line)
+        if n + w > words:
+            parts = line.split()
+            cut = " ".join(parts[:max(0, words - n)])
+            sentence_end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+            out.append(cut[:sentence_end + 1] if sentence_end > len(cut) // 2 else cut + " ...")
+            break
+        out.append(line)
+        n += w
+    return "\n".join(out).rstrip() + "\n\n*Ende der Leseprobe - das ganze Produkt gibt es im Shop.*\n"
+
+
+def clean_posts(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """Nur ehrliche Posts: verbotene Versprechen, Marken und Links fliegen raus (deterministisch)."""
+    posts = []
+    for p in (obj.get("posts") or [])[:4]:
+        if not isinstance(p, dict):
+            continue
+        text = str(p.get("text") or "").strip()[:400]
+        low = text.lower()
+        if not text or re.search(r"https?://|www\.", low) or any(re.search(pat, low) for pat in checks.FORBIDDEN_CLAIMS) \
+                or any(re.search(rf"\b{re.escape(m)}\b", low) for m in checks.TRADEMARKS):
+            continue
+        posts.append({"channel": str(p.get("channel") or "Social")[:40], "text": text})
+    hooks = [str(h)[:160] for h in (obj.get("hooks") or [])[:3]
+             if not any(re.search(pat, str(h).lower()) for pat in checks.FORBIDDEN_CLAIMS)]
+    return {"posts": posts, "hooks": hooks}
+
+
 class Workshop:
     def __init__(self, llm, catalog: Catalog, event_store, cfg: Dict[str, Any], limits: Dict[str, Any],
                  pkg_root: Path, firm_token_budget: Optional[int] = None,
@@ -55,6 +106,8 @@ class Workshop:
         self.cfg, self.limits, self.pkg_root = cfg, limits, Path(pkg_root)
         self.firm_token_budget, self.now = firm_token_budget, now_fn
         self._paused_reason: Optional[str] = None
+        self._idea_wait_until: Optional[datetime] = None
+        self._draft_failures: Dict[str, int] = {}
 
     # ------------------------------------------------------------------ guards
     def blocked(self) -> Optional[str]:
@@ -95,8 +148,10 @@ class Workshop:
         for p in self.catalog.list(["AUDIT_FAILED"]):
             if int(p["revisions"]) < MAX_REVISIONS and not p["data"].get("final_reject"):
                 return await self.draft(p, revise=True)
-        if self.new_allowed():
-            return await self.idea()
+        if self.new_allowed() and (self._idea_wait_until is None or self.now() >= self._idea_wait_until):
+            done = await self.idea()
+            self._idea_wait_until = None if done == "idea" else self.now() + IDEA_BACKOFF
+            return done
         return None
 
     # ------------------------------------------------------------------ niche choice (code, from real sales)
@@ -110,7 +165,7 @@ class Workshop:
                 s["published"] += 1
         for e in self.store.get_events(types=["STUDIO_SALE"]):
             pay = json.loads(e.get("payload_json") or "{}")
-            prod = self.catalog.by_platform_ref(str(pay.get("product_ref") or ""))
+            prod = self.catalog.match_sale(pay)
             if prod and isinstance(pay.get("net_usd"), (int, float)) and not pay.get("refunded"):
                 stats.setdefault(prod["niche"], {"products": 0, "published": 0, "revenue": 0.0})
                 stats[prod["niche"]]["revenue"] += float(pay["net_usd"])
@@ -173,7 +228,11 @@ class Workshop:
         body = await self._ask(BUILDER, DRAFT_SYSTEM, user, 7000, False, p["id"])
         body = body.strip().removeprefix("```markdown").removeprefix("```").removesuffix("```").strip()
         if not body:
-            self.store.append(BUILDER, "STUDIO_ERROR", {"step": "draft", "product_id": p["id"], "error": "leer"})
+            n = self._draft_failures[p["id"]] = self._draft_failures.get(p["id"], 0) + 1
+            self.store.append(BUILDER, "STUDIO_ERROR", {"step": "draft", "product_id": p["id"], "error": f"leer ({n}x)"})
+            if n >= MAX_DRAFT_FAILURES:
+                self.catalog.transition(p["id"], "AUDIT_FAILED", BUILDER, note="Entwurf mehrfach leer - aufgegeben",
+                                        data={"issues": ["kein Entwurf erzeugt"], "final_reject": True})
             return "draft_empty"
         self.catalog.transition(p["id"], "DRAFTED", BUILDER, data={"body": body, "words": checks.word_count(body)},
                                 note="ueberarbeitet" if revise else "")
@@ -185,8 +244,9 @@ class Workshop:
         if not issues:
             raw = await self._ask(AUDITOR, AUDIT_SYSTEM, f"Title: {p['title']}\n\n{body[:60000]}", 900, True, p["id"])
             verdict = extract_json(raw) or {}
-            score = verdict.get("score")
-            if not (verdict.get("pass") is True and isinstance(score, (int, float)) and score >= 7):
+            score = _num(verdict.get("score"))
+            passed = verdict.get("pass") is True or str(verdict.get("pass")).strip().lower() in ("true", "yes", "ja")
+            if not (passed and score is not None and score >= 7):
                 issues = [str(i) for i in (verdict.get("issues") or [])][:8] or [f"Pruefer-Ergebnis ungueltig/zu schwach: {raw[:120]}"]
             else:
                 p["data"]["audit"] = {"score": score, "issues": verdict.get("issues") or []}
@@ -205,8 +265,11 @@ class Workshop:
         if any(re.search(pat, shop_text) for pat in checks.FORBIDDEN_CLAIMS) or \
                 any(re.search(rf"\b{re.escape(m)}\b", shop_text) for m in checks.TRADEMARKS):
             listing = {"title": p["title"], "description": "", "tags": listing["tags"]}   # du schreibst ihn dann selbst
+        raw = await self._ask(BUILDER, MARKETING_SYSTEM, f"Product: {listing['title']}\nLanguage: {p['language']}\n"
+                              f"Audience: {p['data'].get('audience')}\n\n{body[:4000]}", 900, True, p["id"])
+        marketing = {**clean_posts(extract_json(raw) or {}), "sample": sample_excerpt(body)}
         p = self.catalog.transition(p["id"], "AWAITING_APPROVAL", AUDITOR,
                                     note=f"Pruefung bestanden (Score {p['data'].get('audit', {}).get('score')})",
-                                    data={"listing": listing, "audit": p["data"].get("audit")})
+                                    data={"listing": listing, "audit": p["data"].get("audit"), "marketing": marketing})
         package.build(p, self.pkg_root)
         return "awaiting_approval"

@@ -90,6 +90,9 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
             f"{t}:{p.get('sale_id')}"
     if t == "TREASURY_RECOMMENDATION":
         return "Schatzkammer: Empfehlung", " ".join(p.get("recommendations") or [])[:300], NORMAL, f"treasury:{e['id']}"
+    if t == "STUDIO_REVIEW":
+        return "Produkt verkauft sich nicht", f"{p.get('title')}: {p.get('suggestion')}"[:300], NORMAL, \
+            f"studio_review:{p.get('product_id')}"
     if t == "STUDIO_PAUSED":
         return "Studio pausiert", str(p.get("reason"))[:200], LOW, f"studio_paused:{str(p.get('reason'))[:30]}"
     if t == "STUDIO_ERROR":
@@ -137,7 +140,7 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
     return None
 
 
-NOTIFY_TYPES = ["STUDIO_AWAITING_APPROVAL", "STUDIO_SALE", "STUDIO_REFUND", "TREASURY_RECOMMENDATION",
+NOTIFY_TYPES = ["STUDIO_AWAITING_APPROVAL", "STUDIO_SALE", "STUDIO_REFUND", "TREASURY_RECOMMENDATION", "STUDIO_REVIEW",
                 "STUDIO_PAUSED", "STUDIO_ERROR", "RECONCILER_BLIND", "RECONCILER_RECOVERED", "ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
                 "BROKER_OFFLINE", "RESEARCH_FAILED", "BACKUP_FAILED", "INJECTION_SUSPECTED", "STREAM_DISCONNECTED",
                 "DESK_IDLE", "RESEARCH_DONE", "DAILY_REPORT", "HIRING_REQUEST", "PLAYBOOK_PROPOSED", "PROMOTION_CHECK"]

@@ -28,6 +28,11 @@ class FakeLLM:
                               "why": "LAP"})
         elif "quality auditor" in system:
             out = json.dumps({"score": 8 if self.audit_pass else 3, "pass": self.audit_pass, "issues": [] if self.audit_pass else ["zu oberflaechlich"]})
+        elif "OWN social channels" in system:
+            out = json.dumps({"posts": [{"channel": "TikTok", "text": "Tipp: 3 Lernbloecke pro Woche reichen. Mein Plan dazu im Shop."},
+                                        {"channel": "LinkedIn", "text": "Garantiert bestanden mit diesem Plan!"},
+                                        {"channel": "Forum", "text": "Mehr unter https://spam.example"}],
+                              "hooks": ["Mein Lernplan in 30 Sekunden"]})
         elif "shop listing" in system:
             out = json.dumps({"title": "Lernplan LAP", "description": "Garantiert bestanden!", "tags": ["lehre"]})
         else:
@@ -166,3 +171,72 @@ def test_duplicate_title_is_not_made_twice(tmp_path):
     w, cat, _ = setup(tmp_path, FakeLLM())
     assert run(w, 4) == ["idea", "draft", "awaiting_approval", "idea_duplicate"]
     assert len(cat.list()) == 1
+
+
+def test_bad_idea_backs_off_instead_of_burning_tokens(tmp_path):
+    w, cat, _ = setup(tmp_path, FakeLLM())
+    run(w, 3)
+    calls = len(w.llm.calls)
+    assert asyncio.run(w.tick()) == "idea_duplicate"
+    assert asyncio.run(w.tick()) is None and len(w.llm.calls) == calls + 1     # Wartezeit: kein neuer LLM-Aufruf
+
+
+def test_empty_drafts_give_up_after_three(tmp_path):
+    w, cat, _ = setup(tmp_path, FakeLLM(body=""))
+    assert run(w, 4) == ["idea", "draft_empty", "draft_empty", "draft_empty"]
+    p = cat.list()[0]
+    assert p["status"] == "AUDIT_FAILED" and p["data"]["final_reject"] is True
+
+
+def test_auditor_score_as_text_is_understood(tmp_path):
+    class TextScore(FakeLLM):
+        async def generate(self, system, messages, **kw):
+            r = await super().generate(system, messages, **kw)
+            if "quality auditor" in system:
+                r.content = json.dumps({"score": "8/10", "pass": "true", "issues": []})
+            return r
+    w, _, _ = setup(tmp_path, TextScore())
+    assert run(w, 3)[-1] == "awaiting_approval"
+
+
+def test_sale_matches_product_by_link_or_title(tmp_path):
+    w, cat, _ = setup(tmp_path, FakeLLM())
+    p = cat.create("Bewerbungs-Checkliste", "n", "f", "de", 5, {}, "x")
+    for to in ("DRAFTED", "AWAITING_APPROVAL"):
+        cat.transition(p["id"], to, "x")
+    cat.transition(p["id"], "APPROVED", "OP", operator=True)
+    cat.transition(p["id"], "PUBLISHED", "OP", operator=True, platform_ref="https://me.gumroad.com/l/bewerb")
+    assert cat.match_sale({"product_ref": "zzz==", "product_permalink": "bewerb"})["id"] == p["id"]
+    assert cat.match_sale({"product_ref": "yyy", "product_name": "Bewerbungs-Checkliste"})["id"] == p["id"]
+    assert cat.match_sale({"product_ref": "nope", "product_name": "anderes"}) is None
+
+
+def test_marketing_kit_is_honest_and_packaged(tmp_path):
+    w, cat, _ = setup(tmp_path, FakeLLM())
+    run(w, 3)
+    p = cat.list(["AWAITING_APPROVAL"])[0]
+    mk = p["data"]["marketing"]
+    assert [x["channel"] for x in mk["posts"]] == ["TikTok"]          # Versprechen + Link aussortiert
+    assert "Leseprobe" in mk["sample"] and len(mk["sample"].split()) < 400
+    folder = tmp_path / "pkg" / p["id"]
+    assert "Tipp: 3 Lernbloecke" in (folder / "marketing.txt").read_text(encoding="utf-8")
+    assert (folder / "leseprobe.pdf").read_bytes()[:5] == b"%PDF-"
+
+
+def test_unsold_published_products_are_flagged_once(tmp_path):
+    from datetime import timedelta
+    from src.firm.studio.review import review_products
+    w, cat, store = setup(tmp_path, FakeLLM())
+    ids = []
+    for t in ("A Planer", "B Planer"):
+        p = cat.create(t, "n", "f", "de", 5, {}, "x")
+        for to in ("DRAFTED", "AWAITING_APPROVAL"):
+            cat.transition(p["id"], to, "x")
+        cat.transition(p["id"], "APPROVED", "OP", operator=True)
+        cat.transition(p["id"], "PUBLISHED", "OP", operator=True, platform_ref="ref-" + t[0])
+        ids.append(p["id"])
+    store.append("STUDIO", "STUDIO_SALE", {"sale_id": "1", "product_ref": "ref-B", "net_usd": 4.0})
+    later = datetime.utcnow() + timedelta(days=46)
+    assert review_products(cat, store, datetime.utcnow()) == []
+    assert review_products(cat, store, later) == [ids[0]]
+    assert review_products(cat, store, later) == []

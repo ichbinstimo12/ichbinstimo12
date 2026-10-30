@@ -317,17 +317,23 @@ class FirmOrchestrator:
                             load_config(), load_limits(), Path(os.getenv("FIRM_STUDIO_DIR", "data/studio/products")),
                             firm_token_budget=int(self.limits.get("operational", {}).get("max_token_budget_daily", 0)) or None)
         logger.info(f"Studio started (one step every {interval:.0f}s; limits {workshop.limits}).")
+        failures = 0
         while self.is_running:
             try:
                 done = await workshop.tick()
+                failures = 0
                 if done:
                     logger.info(f"Studio: {done}")
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                logger.error(f"Studio step failed: {e}")
-                self.event_store.append("STUDIO", "STUDIO_ERROR", {"step": "tick", "error": f"{type(e).__name__}: {str(e)[:200]}"})
-            await asyncio.sleep(interval)
+                failures += 1
+                logger.error(f"Studio step failed ({failures} in a row): {e}")
+                if failures in (1, 5) or failures % 20 == 0:     # LLM down: report, but do not flood
+                    self.event_store.append("STUDIO", "STUDIO_ERROR", {"step": "tick", "error": f"{type(e).__name__}: {str(e)[:200]}",
+                                                                       "in_a_row": failures})
+            # growing pause after errors (LLM/Internet down), at most 1 h
+            await asyncio.sleep(interval if not failures else min(3600.0, interval * 2 ** min(failures, 6)))
 
     def _supervised(self, name: str, factory) -> asyncio.Task:
         """Background loop that never dies silently: an exception (or an unexpected return) is logged, written as

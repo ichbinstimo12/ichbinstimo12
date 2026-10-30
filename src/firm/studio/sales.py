@@ -34,7 +34,8 @@ def parse_sale(s: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if gross is None:
         return None
     return {"sale_id": str(s["id"]), "product_ref": str(s.get("product_id") or ""),
-            "product_name": str(s.get("product_name") or "")[:120], "currency": str(s.get("currency") or "usd").lower(),
+            "product_name": str(s.get("product_name") or "")[:120],
+            "product_permalink": str(s.get("product_permalink") or s.get("permalink") or "")[:80], "currency": str(s.get("currency") or "usd").lower(),
             "gross": gross, "fee": fee or 0.0, "net": round(gross - (fee or 0.0), 2),
             "refunded": bool(s.get("refunded")), "sold_at": s.get("created_at")}
 

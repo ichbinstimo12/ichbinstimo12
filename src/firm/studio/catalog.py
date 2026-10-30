@@ -79,6 +79,22 @@ class Catalog:
             r = c.execute("SELECT * FROM studio_products WHERE platform_ref = ?", (ref,)).fetchone()
         return self._row(r) if r else None
 
+    def match_sale(self, sale: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Welches Produkt wurde verkauft? Shop-ID, dann Link/Permalink im eingetragenen Verweis, dann Titel."""
+        ref = str(sale.get("product_ref") or "").strip()
+        if ref:
+            hit = self.by_platform_ref(ref)
+            if hit:
+                return hit
+        name = str(sale.get("product_name") or "").strip().lower()
+        perma = str(sale.get("product_permalink") or "").strip().lower()
+        for p in self.list(["PUBLISHED", "RETIRED"], limit=10_000):
+            pref = str(p.get("platform_ref") or "").lower()
+            titles = {p["title"].lower(), str((p["data"].get("listing") or {}).get("title") or "").lower()}
+            if (ref and ref.lower() in pref) or (perma and pref.rstrip("/").endswith("/" + perma)) or (name and name in titles):
+                return p
+        return None
+
     # ------------------------------------------------------------------ write
     def create(self, title: str, niche: str, fmt: str, language: str, price_usd: float,
                data: Dict[str, Any], actor: str) -> Dict[str, Any]:

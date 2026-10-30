@@ -285,6 +285,8 @@ async def _run_studio() -> int:
     from src.firm.money.strategy_gate import StrategyGate
     from src.firm.studio.config import load_config, load_treasury
     from src.firm.studio.sales import SalesSync
+    from src.firm.studio.catalog import Catalog
+    from src.firm.studio.review import review_products
     from src.firm.studio.treasury import TreasuryReporter
     stop = asyncio.Event()
     with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
@@ -307,8 +309,9 @@ async def _run_studio() -> int:
                     logger.info(f"Shop: {res['new']} new sale(s), {res['refunds']} refund(s)")
             try:
                 reporter.tick()
+                review_products(Catalog(store.db_path, store), store)
             except Exception as e:
-                logger.error(f"Treasury report failed: {e}")
+                logger.error(f"Treasury report / product review failed: {e}")
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=300)
     return 0
