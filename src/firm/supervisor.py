@@ -5,6 +5,7 @@
   mcp    capitalcom-mcp als lokaler HTTP-Dienst (127.0.0.1), Demo-Schluessel, Trading serverseitig AUS
   brain  Agenten, Scheduler, LLM -> OHNE Broker-Schluessel (auch .env wird nicht gelesen)
   api    Dashboard -> ohne Broker- und LLM-Schluessel
+  studio Verkaeufe aus dem Shop lesen + Schatzkammer (nur GUMROAD_-Schluessel, keine Broker-/LLM-Schluessel)
   notify Handy-Benachrichtigungen + Totmannschalter-Ping (nur wenn NOTIFY_*/HEALTHCHECK_PING_URL gesetzt)
          -> ohne Broker- und LLM-Schluessel; die Benachrichtigungs-Tokens kennt nur dieser Prozess
 
@@ -30,6 +31,7 @@ logger = logging.getLogger("Supervisor")
 BROKER_KEYS = ("CAPITAL_", "CAP_")
 LLM_KEYS = ("ANTHROPIC_",)
 NOTIFY_KEYS = ("NOTIFY_", "HEALTHCHECK_")
+STUDIO_KEYS = ("GUMROAD_",)                  # shop token: only the studio zone (reads sales, never moves money)
 RETIRED_KEYS = ("SOLANA_", "X_BEARER_TOKEN", "BIRDEYE_", "MEMEDESK_")   # removed memecoin desk: no zone sees these
 ALWAYS_DROP = ("FIRM_API_TOKEN",)
 
@@ -75,8 +77,8 @@ class Supervisor:
         py = [sys.executable, "-m", "src.firm"]
         mode_env = {"FIRM_MODE": self.mode}
         kids: List[Child] = [Child("money", py + ["zone", "money", "--mode", self.mode],
-                                   {**filtered_env(self.base_env, LLM_KEYS + NOTIFY_KEYS + RETIRED_KEYS), **mode_env}, critical=True)]
-        brain_env = {**filtered_env(self.base_env, BROKER_KEYS + NOTIFY_KEYS + RETIRED_KEYS), **mode_env}
+                                   {**filtered_env(self.base_env, LLM_KEYS + NOTIFY_KEYS + RETIRED_KEYS + STUDIO_KEYS), **mode_env}, critical=True)]
+        brain_env = {**filtered_env(self.base_env, BROKER_KEYS + NOTIFY_KEYS + RETIRED_KEYS + STUDIO_KEYS), **mode_env}
         mcp = self._mcp_child()
         if mcp is not None:
             kids.append(mcp)
@@ -86,11 +88,15 @@ class Supervisor:
         kids.append(Child("brain", py + ["zone", "brain", "--mode", self.mode], brain_env))
         if self.dashboard:
             kids.append(Child("api", py + ["zone", "api", "--host", self.host, "--port", str(self.port)],
-                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + NOTIFY_KEYS + RETIRED_KEYS, keep_api_token=True),
+                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + NOTIFY_KEYS + RETIRED_KEYS + STUDIO_KEYS, keep_api_token=True),
                                **mode_env}))
         if self.notify_configured():
             kids.append(Child("notify", py + ["zone", "notify"],
-                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + RETIRED_KEYS), **mode_env}))
+                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + RETIRED_KEYS + STUDIO_KEYS), **mode_env}))
+        if self.base_env.get("FIRM_STUDIO", "1").strip().lower() not in ("0", "false", "no", "off"):
+            # Studio sales/treasury: only the shop token; no broker, LLM or notification keys
+            kids.append(Child("studio", py + ["zone", "studio"],
+                              {**filtered_env(self.base_env, BROKER_KEYS + LLM_KEYS + NOTIFY_KEYS + RETIRED_KEYS), **mode_env}))
         return kids
 
     def notify_configured(self) -> bool:

@@ -63,6 +63,16 @@ def build_facts(event_store, mode: str, gate=None, overlay=None, desk=None) -> D
         }
 
     try:
+        from src.firm.studio.catalog import Catalog
+        from src.firm.studio.sales import revenue
+        cat = Catalog(event_store.db_path)
+        rev = revenue(event_store)
+        facts["studio"] = {"awaiting_operator": cat.count(["AWAITING_APPROVAL", "APPROVED"]),
+                           "published": cat.count(["PUBLISHED"]), "in_work": cat.count(["IDEA", "DRAFTED"]),
+                           "sales": rev["sales"], "revenue_net_usd": rev["net_usd"]}
+    except Exception:
+        facts["studio"] = "UNKNOWN"
+    try:
         from src.firm.reports import performance
         facts["performance_30d"] = performance.cached_findings(event_store)
     except Exception:

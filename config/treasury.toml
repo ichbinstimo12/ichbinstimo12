@@ -1,0 +1,14 @@
+# Schatzkammer: wie die Firma mit verdientem Geld umgehen SOLL. Nur du aenderst diese Datei.
+# Die Firma bewegt nie selbst Geld. Sie rechnet und empfiehlt; ueberweisen tust du.
+
+[policy]
+# ANNAHME: Ruecklage fuer Steuern/Abgaben auf Nebeneinkommen. Mit dem Steueramt bzw. einer Fachperson klaeren.
+tax_reserve_pct = 0.25
+# So viele Monate KI- und Plattformkosten bleiben immer als Reserve stehen.
+runway_months = 3
+# Vom freien Ueberschuss (nach Steuer-Ruecklage und Reserve) duerfen hoechstens so viel Prozent ins Trading-Konto ...
+trading_topup_pct = 0.5
+# ... und nur, wenn mindestens eine Strategie die Pruefung bestanden hat (PASS) und es Live-Ergebnisse gibt.
+require_pass_strategy = true
+# Ab welchem Ueberschuss (USD) ueberhaupt eine Empfehlung kommt (kleine Betraege lohnen keine Ueberweisung).
+min_transfer_usd = 50

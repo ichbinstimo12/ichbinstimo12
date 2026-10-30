@@ -81,6 +81,19 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
         return "Neuer Markt hat die Pruefung bestanden", f"{p.get('epic')}: {p.get('verdict')} mit {p.get('strategy')} " \
             f"({p.get('resolution')}). Zum Handeln in config/whitelist.toml eintragen - deine Entscheidung.", NORMAL, \
             f"wl:{p.get('epic')}"
+    if t == "STUDIO_AWAITING_APPROVAL":
+        return "Neues Produkt wartet auf Freigabe", f"{p.get('title')} - im Dashboard pruefen (STUDIO)", NORMAL, \
+            f"studio_wait:{p.get('product_id')}"
+    if t in ("STUDIO_SALE", "STUDIO_REFUND"):
+        amount = f" · netto {p.get('net_usd')} USD" if amounts and p.get("net_usd") is not None else ""
+        return ("Verkauf!" if t == "STUDIO_SALE" else "Rueckerstattung"), f"{p.get('product_name')}{amount}", NORMAL, \
+            f"{t}:{p.get('sale_id')}"
+    if t == "TREASURY_RECOMMENDATION":
+        return "Schatzkammer: Empfehlung", " ".join(p.get("recommendations") or [])[:300], NORMAL, f"treasury:{e['id']}"
+    if t == "STUDIO_PAUSED":
+        return "Studio pausiert", str(p.get("reason"))[:200], LOW, f"studio_paused:{str(p.get('reason'))[:30]}"
+    if t == "STUDIO_ERROR":
+        return "Studio-Fehler", f"{p.get('step')}: {str(p.get('error'))[:200]}", LOW, f"studio_err:{p.get('step')}"
     if t == "ACCOUNT_BOUND":
         return "Konto erkannt", f"{p.get('account')} (Hoechststand/Tagesstart neu)", NORMAL, f"acct:{p.get('account')}"
     if t == "CIRCUIT_BREAKER":
@@ -124,7 +137,8 @@ def format_event(e: Dict[str, Any], amounts: bool) -> Optional[Tuple[str, str, s
     return None
 
 
-NOTIFY_TYPES = ["RECONCILER_BLIND", "RECONCILER_RECOVERED", "ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
+NOTIFY_TYPES = ["STUDIO_AWAITING_APPROVAL", "STUDIO_SALE", "STUDIO_REFUND", "TREASURY_RECOMMENDATION",
+                "STUDIO_PAUSED", "STUDIO_ERROR", "RECONCILER_BLIND", "RECONCILER_RECOVERED", "ORDER_FILLED", "TRADE_RESULT", "TRADING_HALTED", "KILL_SWITCH", "LLM_STATUS", "ACCOUNT_BOUND", "LIMITS_WARNING", "WHITELIST_CANDIDATE", "TASK_DIED", "NEWS_DEGRADED", "CIRCUIT_BREAKER", "STRATEGY_STOPPED",
                 "BROKER_OFFLINE", "RESEARCH_FAILED", "BACKUP_FAILED", "INJECTION_SUSPECTED", "STREAM_DISCONNECTED",
                 "DESK_IDLE", "RESEARCH_DONE", "DAILY_REPORT", "HIRING_REQUEST", "PLAYBOOK_PROPOSED", "PROMOTION_CHECK"]
 

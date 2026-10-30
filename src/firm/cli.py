@@ -209,6 +209,8 @@ async def _run_zone(args) -> int:
         return 0
     if args.name == "notify":
         return await _run_notify()
+    if args.name == "studio":
+        return await _run_studio()
     if HALT_FILE.exists():
         logger.error("Halt flag active - zone %s not started.", args.name)
         return 0
@@ -275,6 +277,88 @@ async def _run_notify() -> int:
     return 0
 
 
+async def _run_studio() -> int:
+    """Studio zone: reads shop sales (read-only token) and writes the treasury report. Never moves money."""
+    import signal
+    import httpx
+    from src.firm.bus.event_store import EventStore
+    from src.firm.money.strategy_gate import StrategyGate
+    from src.firm.studio.config import load_config, load_treasury
+    from src.firm.studio.sales import SalesSync
+    from src.firm.studio.treasury import TreasuryReporter
+    stop = asyncio.Event()
+    with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop.set)
+    store = EventStore(os.getenv("FIRM_DB_PATH", "firm_events.db"))
+    gate = StrategyGate()
+    reporter = TreasuryReporter(store, load_config().get("llm_prices", {}), load_treasury(), gate.overview)
+    sync_every = float(os.getenv("FIRM_STUDIO_SALES_SECONDS", "1800"))
+    async with httpx.AsyncClient() as http:
+        sync = SalesSync(store, http)
+        logger.info("Studio zone: " + ("reading shop sales every %.0fs" % sync_every if sync.configured
+                                       else "no GUMROAD_ACCESS_TOKEN - sales are not read yet"))
+        last_sync = 0.0
+        while not stop.is_set() and not HALT_FILE.exists():
+            loop_time = asyncio.get_running_loop().time()
+            if sync.configured and loop_time - last_sync >= sync_every:
+                res = await sync.sync()
+                last_sync = loop_time
+                if res.get("new") or res.get("refunds"):
+                    logger.info(f"Shop: {res['new']} new sale(s), {res['refunds']} refund(s)")
+            try:
+                reporter.tick()
+            except Exception as e:
+                logger.error(f"Treasury report failed: {e}")
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=300)
+    return 0
+
+
+def _studio_command(args) -> int:
+    """Operator decisions on studio products (also possible in the dashboard). Logged as OPERATOR events."""
+    from src.firm.bus.event_store import EventStore
+    from src.firm.studio.catalog import Catalog, TransitionError
+    store = EventStore(os.getenv("FIRM_DB_PATH", "firm_events.db"))
+    cat = Catalog(store.db_path, store)
+    if args.action == "list":
+        for p in cat.list(limit=50):
+            print(f"{p['id']}  {p['status']:<18} {p['price_usd']:>6.2f} USD  {p['title']}")
+        return 0
+    if not args.product_id:
+        print("Produkt-ID fehlt (siehe: firm studio list)")
+        return 1
+    target = {"approve": "APPROVED", "reject": "REJECTED", "published": "PUBLISHED", "retire": "RETIRED"}[args.action]
+    if target == "PUBLISHED" and not args.ref:
+        print("Bitte die Produkt-ID oder den Link aus dem Shop angeben: firm studio published <ID> <REF>")
+        return 1
+    try:
+        p = cat.transition(args.product_id, target, "OPERATOR", operator=True, note="cli", platform_ref=args.ref)
+    except TransitionError as e:
+        print(f"Nicht moeglich: {e}")
+        return 1
+    print(f"{p['id']}: {p['status']}")
+    return 0
+
+
+def _treasury_command(args) -> int:
+    from src.firm.bus.event_store import EventStore
+    from src.firm.money.strategy_gate import StrategyGate
+    from src.firm.studio.config import load_config, load_treasury
+    from src.firm.studio.treasury import report
+    store = EventStore(os.getenv("FIRM_DB_PATH", "firm_events.db"))
+    if args.action == "transferred":
+        if not args.usd or args.usd <= 0:
+            print("Betrag in USD angeben, z. B.: firm treasury transferred 50")
+            return 1
+        store.append("OPERATOR", "TREASURY_TRANSFER_RECORDED", {"usd": round(args.usd, 2), "source": "cli",
+                                                                "note": "vom Operator selbst ueberwiesen"})
+        print(f"Eingetragen: {args.usd:.2f} USD ueberwiesen.")
+        return 0
+    r = report(store, load_config().get("llm_prices", {}), load_treasury(), StrategyGate().overview())
+    print(json.dumps({k: v for k, v in r.items() if k != "by_product"}, indent=1, default=str))
+    return 0
+
+
 async def _notify_test() -> int:
     from src.firm.ops.notify import Notifier
     notifier = Notifier()
@@ -310,7 +394,7 @@ async def main():
 
     # 'zone' - one isolated process, started by the supervisor
     zone_parser = subparsers.add_parser("zone", help="(intern) eine isolierte Zone; startet der Supervisor")
-    zone_parser.add_argument("name", choices=["money", "brain", "api", "notify"])
+    zone_parser.add_argument("name", choices=["money", "brain", "api", "notify", "studio"])
     zone_parser.add_argument("--mode", default=os.getenv("FIRM_MODE", "PAPER"))
     zone_parser.add_argument("--host", default="127.0.0.1")
     zone_parser.add_argument("--port", type=int, default=8000)
@@ -320,6 +404,13 @@ async def main():
     eval_parser.add_argument("--runs", type=int, default=3)
     eval_parser.add_argument("--scenario", default=None)
 
+    studio_parser = subparsers.add_parser("studio", help="Studio: list | approve ID | reject ID | published ID REF | retire ID")
+    studio_parser.add_argument("action", choices=["list", "approve", "reject", "published", "retire"], nargs="?", default="list")
+    studio_parser.add_argument("product_id", nargs="?")
+    studio_parser.add_argument("ref", nargs="?", help="bei published: Produkt-ID/Link im Shop")
+    treasury_parser = subparsers.add_parser("treasury", help="Schatzkammer: status | transferred USD")
+    treasury_parser.add_argument("action", choices=["status", "transferred"], nargs="?", default="status")
+    treasury_parser.add_argument("usd", nargs="?", type=float)
     subparsers.add_parser("notify-test", help="Testnachricht an ntfy/Telegram senden und Healthcheck pingen")
 
     # 'halt' / 'resume'
@@ -410,11 +501,17 @@ async def main():
         notify_stop = asyncio.Event()
         notify_task = (asyncio.create_task(notifier.run(orchestrator.event_store, HALT_FILE, stop=notify_stop))
                        if notifier.configured else None)
+        studio_task = (asyncio.create_task(_run_studio())
+                       if os.getenv("FIRM_STUDIO", "1").strip().lower() not in ("0", "false", "no", "off") else None)
         try:
             await orchestrator.start(mode=args.mode)
         except KeyboardInterrupt:
             logger.info("Shutting down via KeyboardInterrupt...")
         finally:
+            if studio_task is not None:
+                studio_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await studio_task
             if notify_task is not None:
                 notify_stop.set()
                 with contextlib.suppress(asyncio.TimeoutError, Exception):
@@ -460,6 +557,10 @@ async def main():
         return await _run_zone(args)
 
 
+    elif args.command == "studio":
+        return _studio_command(args)
+    elif args.command == "treasury":
+        return _treasury_command(args)
     elif args.command == "notify-test":
         return await _notify_test()
 

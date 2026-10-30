@@ -425,6 +425,73 @@ def create_app(
         from src.firm.reports import performance as perf
         return await asyncio.to_thread(perf.build, store, max(1.0, min(days, 365.0)))
 
+    # ---------------- Studio (digitale Produkte) + Schatzkammer ----------------
+    def studio_catalog():
+        from src.firm.studio.catalog import Catalog
+        return Catalog(store.db_path, store)
+
+    @app.get("/api/studio", dependencies=[Depends(require_token)])
+    async def studio():
+        from src.firm.money.strategy_gate import StrategyGate
+        from src.firm.studio import treasury as tr
+        from src.firm.studio.config import load_config, load_limits, load_treasury
+
+        def build():
+            cat = studio_catalog()
+            products = [{k: p[k] for k in ("id", "status", "title", "niche", "format", "language", "price_usd",
+                                           "created_at", "updated_at", "platform_ref", "revisions")}
+                        | {"listing": p["data"].get("listing"), "audit": p["data"].get("audit"),
+                           "issues": p["data"].get("issues"), "words": p["data"].get("words")}
+                        for p in cat.list(limit=100)]
+            rep = tr.report(store, load_config().get("llm_prices", {}), load_treasury(), StrategyGate().overview())
+            paused = store.get_events(types=["STUDIO_PAUSED"], last=1)
+            return {"products": products, "limits": load_limits(), "treasury": rep,
+                    "paused": json.loads(paused[-1]["payload_json"]).get("reason") if paused else None}
+        return await asyncio.to_thread(build)
+
+    @app.get("/api/studio/{product_id}/package", dependencies=[Depends(require_token)])
+    async def studio_package(product_id: str):
+        from fastapi.responses import Response
+        from src.firm.studio import package
+        p = studio_catalog().get(product_id)
+        if p is None or p["status"] not in ("AWAITING_APPROVAL", "APPROVED", "PUBLISHED"):
+            raise HTTPException(status_code=404, detail="kein Paket fuer dieses Produkt")
+        root = Path(os.getenv("FIRM_STUDIO_DIR", "data/studio/products"))
+        folder = root / p["id"]
+        if not folder.exists():
+            folder = package.build(p, root)
+        return Response(package.zip_bytes(folder), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{p["id"]}.zip"'})
+
+    @app.post("/api/studio/{product_id}/decision", dependencies=[Depends(require_token)])
+    async def studio_decision(product_id: str, body: Dict[str, str]):
+        from src.firm.studio.catalog import TransitionError
+        target = {"APPROVED": "APPROVED", "REJECTED": "REJECTED", "PUBLISHED": "PUBLISHED",
+                  "RETIRED": "RETIRED"}.get(str((body or {}).get("decision") or "").upper())
+        if target is None:
+            raise HTTPException(status_code=400, detail="decision: APPROVED | REJECTED | PUBLISHED | RETIRED")
+        ref = str((body or {}).get("ref") or "").strip()[:200] or None
+        if target == "PUBLISHED" and not ref:
+            raise HTTPException(status_code=400, detail="ref (Produkt-ID oder Link im Shop) fehlt")
+        try:
+            p = studio_catalog().transition(product_id, target, "OPERATOR", operator=True,
+                                            note=str((body or {}).get("note") or "dashboard")[:300], platform_ref=ref)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        return {"id": p["id"], "status": p["status"]}
+
+    @app.post("/api/treasury/transferred", dependencies=[Depends(require_token)])
+    async def treasury_transferred(body: Dict[str, Any]):
+        try:
+            usd = round(float((body or {}).get("usd")), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="usd fehlt")
+        if not 0 < usd <= 1_000_000:
+            raise HTTPException(status_code=400, detail="usd ausserhalb des gueltigen Bereichs")
+        store.append("OPERATOR", "TREASURY_TRANSFER_RECORDED", {"usd": usd, "source": "dashboard",
+                                                                "note": "vom Operator selbst ueberwiesen"})
+        return {"recorded_usd": usd}
+
     @app.post("/api/hire/{request_id}", dependencies=[Depends(require_token)])
     async def hire(request_id: str, decision: Dict[str, str]):
         ceo = ceo_obj()

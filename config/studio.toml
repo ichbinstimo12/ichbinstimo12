@@ -1,0 +1,25 @@
+# Studio: digitale Produkte (Vorlagen, Checklisten, Lern-Guides), die die Firma entwirft und du freigibst.
+# Harte Grenzen (Anzahl, KI-Budget, Preisrahmen) stehen NICHT hier, sondern in config/limits.toml unter [studio]
+# (fehlt der Abschnitt, gelten die sicheren Standardwerte aus src/firm/studio/config.py).
+
+[shop]
+platform = "gumroad"          # Verkaufszahlen werden nur gelesen (GUMROAD_ACCESS_TOKEN in .env)
+currency = "usd"
+
+[product]
+languages = ["de", "en"]
+# Themen, zu denen du selbst etwas weisst (echte Erfahrung = bessere Produkte). Die Agenten waehlen daraus.
+niches = [
+  "Lehre und Ausbildung in der Schweiz (Lernplaene, Pruefungsvorbereitung, Lehrstellensuche)",
+  "Bewerbung und Lebenslauf fuer Berufseinsteiger",
+  "Budget und Geldplanung fuer junge Erwachsene (kein Anlage- oder Steuerrat)",
+  "Produktivitaet: Wochenplaner, Gewohnheits-Tracker, Lernkarten-Vorlagen",
+]
+formats = ["Checkliste", "Vorlage/Planer", "Kurz-Guide (10-25 Seiten)", "Arbeitsblatt-Set"]
+min_words = 1200
+
+# Was die KI kostet (USD je 1 Mio. Tokens), fuer die Kostenrechnung der Schatzkammer. Ollama = 0.
+[llm_prices]
+"claude-opus-5-5" = { input = 4.00, output = 20.00 }
+"claude-sonnet-5-5" = { input = 2.00, output = 10.00 }
+"claude-haiku-5-5" = { input = 0.10, output = 0.50 }

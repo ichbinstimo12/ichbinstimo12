@@ -1,7 +1,10 @@
 # Spec: Neue Einnahmequellen der Firma (Phase 0 – wartet auf Gate 0)
 
-Stand 2026-10-30. Status: **Entwurf. Noch nichts davon gebaut.** Gebaut wird erst nach deiner Freigabe und
-deinen Antworten auf die Fragen unten (CLAUDE.md: Spec → Architektur → Plan → Test-first-Bau, Stopp an jedem Gate).
+Stand 2026-10-30. Status: **Gate 0 beantwortet, Option A gebaut** – siehe `docs/studio.md`.
+
+Deine Antworten: (1) was am automatischsten läuft → A, digitale Produkte; (2) noch kein Shop; (3) Hobby neben der
+Lehre, nicht angemeldet; (4) 1–2 Stunden für Freigaben; (5) kleiner Startbetrag, danach soll sich die Firma selbst
+tragen, Gewinne sinnvoll (auch fürs Trading) einsetzen.
 
 ## Ausgangslage (ehrlich)
 

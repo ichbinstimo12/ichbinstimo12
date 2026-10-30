@@ -106,3 +106,13 @@ def test_retired_memecoin_keys_reach_no_zone(tmp_path):
     assert "meme" not in kids
     for child in kids.values():
         assert "SOLANA_RPC_URL" not in child.env and "X_BEARER_TOKEN" not in child.env
+
+
+def test_shop_token_only_in_studio_zone(tmp_path):
+    kids = _plan(tmp_path, FIRM_MCP="0", GUMROAD_ACCESS_TOKEN="shop", CAPITAL_API_KEY="cap", ANTHROPIC_API_KEY="llm")
+    st = kids["studio"].env
+    assert st["GUMROAD_ACCESS_TOKEN"] == "shop" and "CAPITAL_API_KEY" not in st and "ANTHROPIC_API_KEY" not in st
+    for name, child in kids.items():
+        if name != "studio":
+            assert "GUMROAD_ACCESS_TOKEN" not in child.env, name
+    assert "studio" not in _plan(tmp_path, FIRM_MCP="0", FIRM_STUDIO="0")

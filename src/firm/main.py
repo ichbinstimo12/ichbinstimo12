@@ -295,6 +295,39 @@ class FirmOrchestrator:
             self._supervised("agent_loop", self.agent_loop),
             self._supervised("hiring_loop", self.hiring_loop),
         ]
+        if os.getenv("FIRM_STUDIO", "1").strip().lower() not in ("0", "false", "no", "off"):
+            self._background_tasks.append(self._supervised("studio_loop", self.studio_loop))
+
+    def _studio_llm(self):
+        """The studio may use a different (better) model than the agents: STUDIO_LLM_PROVIDER / STUDIO_MODEL."""
+        provider, model = os.getenv("STUDIO_LLM_PROVIDER", "").strip(), os.getenv("STUDIO_MODEL", "").strip()
+        if not provider and not model:
+            return self.llm
+        from src.firm.llm.factory import create_llm_provider
+        return create_llm_provider(provider_name=provider or getattr(self.llm, "provider_name", None), model=model or None)
+
+    async def studio_loop(self):
+        """Studio: one workshop step at a time (idea, draft, audit). Products only reach AWAITING_APPROVAL -
+        publishing is the operator's decision. Limits: config/limits.toml [studio] (defaults in studio/config.py)."""
+        from src.firm.studio.catalog import Catalog
+        from src.firm.studio.config import load_config, load_limits
+        from src.firm.studio.workshop import Workshop
+        interval = float(os.getenv("FIRM_STUDIO_SECONDS", "300"))
+        workshop = Workshop(self._studio_llm(), Catalog(self.event_store.db_path, self.event_store), self.event_store,
+                            load_config(), load_limits(), Path(os.getenv("FIRM_STUDIO_DIR", "data/studio/products")),
+                            firm_token_budget=int(self.limits.get("operational", {}).get("max_token_budget_daily", 0)) or None)
+        logger.info(f"Studio started (one step every {interval:.0f}s; limits {workshop.limits}).")
+        while self.is_running:
+            try:
+                done = await workshop.tick()
+                if done:
+                    logger.info(f"Studio: {done}")
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Studio step failed: {e}")
+                self.event_store.append("STUDIO", "STUDIO_ERROR", {"step": "tick", "error": f"{type(e).__name__}: {str(e)[:200]}"})
+            await asyncio.sleep(interval)
 
     def _supervised(self, name: str, factory) -> asyncio.Task:
         """Background loop that never dies silently: an exception (or an unexpected return) is logged, written as

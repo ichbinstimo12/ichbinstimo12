@@ -292,6 +292,13 @@ Dashboard-Panel „GELD-BILANZ", `GET /api/performance?days=30`, Abschnitt im Ta
 | `FIRM_AGENT_PARALLEL` | 4 | so viele Agenten arbeiten gleichzeitig (lokales Ollama langsam → 1 oder 2) |
 | `FIRM_OLLAMA_AUTOSTART` | 1 | startet `ollama serve`, wenn Ollama lokal nicht erreichbar und installiert ist |
 
+## 5d. Studio (digitale Produkte) und Schatzkammer
+
+Anleitung: **docs/studio.md**. Kurz: Das Studio entwirft und prüft Produkte selbst, du gibst im Dashboard frei und
+lädst hoch (ca. 10 min/Produkt). Verkäufe liest die Zone `studio` (nur `GUMROAD_ACCESS_TOKEN`). Die Schatzkammer
+empfiehlt, wie Gewinne verwendet werden; Geld bewegst nur du. Befehle: `firm studio list|approve|reject|published|
+retire`, `firm treasury status|transferred <USD>`.
+
 ## 6. Docker / 24/7-Server
 
 Schritt-für-Schritt: **docs/deploy_vps.md**. Kurz: `./scripts/firmctl.sh start | status | logs | halt | resume |

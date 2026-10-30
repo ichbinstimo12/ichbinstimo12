@@ -152,3 +152,27 @@ def test_websocket_rejects_foreign_origin(api):
             ws.receive_json()
     with client.websocket_connect(f"/ws/office?token={TOKEN}", headers={"origin": "http://127.0.0.1:8000"}) as ws:
         assert ws.receive_json()["type"]
+
+
+def test_studio_endpoints_need_token_and_only_operator_decides(api, tmp_path, monkeypatch):
+    from src.firm.studio.catalog import Catalog
+    client, store, _ = api
+    monkeypatch.setenv("FIRM_STUDIO_DIR", str(tmp_path / "pkg"))
+    h = {"Authorization": f"Bearer {TOKEN}"}
+    cat = Catalog(store.db_path, store)
+    p = cat.create("Lernplan", "n", "Planer", "de", 9, {}, "StudioResearcher")
+    cat.transition(p["id"], "DRAFTED", "StudioBuilder", data={"body": "# A\n## B\n## C\ntext"})
+    cat.transition(p["id"], "AWAITING_APPROVAL", "StudioAuditor")
+    assert client.get("/api/studio").status_code == 401
+    body = client.get("/api/studio", headers=h).json()
+    assert body["products"][0]["status"] == "AWAITING_APPROVAL" and body["treasury"]["sales"] == 0
+    z = client.get(f"/api/studio/{p['id']}/package", headers=h)
+    assert z.status_code == 200 and z.headers["content-type"] == "application/zip"
+    assert client.post(f"/api/studio/{p['id']}/decision", json={"decision": "PUBLISHED"}, headers=h).status_code == 400
+    assert client.post(f"/api/studio/{p['id']}/decision", json={"decision": "APPROVED"}, headers=h).json()["status"] == "APPROVED"
+    assert client.post(f"/api/studio/{p['id']}/decision", json={"decision": "APPROVED"}, headers=h).status_code == 409
+    r = client.post(f"/api/studio/{p['id']}/decision", json={"decision": "PUBLISHED", "ref": "gum1"}, headers=h)
+    assert r.json()["status"] == "PUBLISHED"
+    assert client.post("/api/treasury/transferred", json={"usd": -5}, headers=h).status_code == 400
+    assert client.post("/api/treasury/transferred", json={"usd": 25}, headers=h).json()["recorded_usd"] == 25.0
+    assert [e["agent_id"] for e in store.get_events(types=["STUDIO_APPROVED", "STUDIO_PUBLISHED"])] == ["OPERATOR", "OPERATOR"]

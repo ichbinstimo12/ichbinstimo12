@@ -60,6 +60,7 @@ def build(event_store, days: float = 30.0) -> Dict[str, Any]:
                    "best": sorted(solid_shadow, key=lambda g: -g["expectancy_r"])[:8],
                    "worst": sorted(solid_shadow, key=lambda g: g["expectancy_r"])[:5],
                    "research_candidates": shadow_stats.promising(shadow)},
+        "studio": _studio(event_store, days),
         "rejections": dict(rejected.most_common(8)),
     }
     report["findings"] = findings(report)
@@ -80,6 +81,14 @@ def cached_findings(event_store, ttl_s: float = 300.0, now_fn=time.monotonic) ->
     return res
 
 
+def _studio(event_store, days: float) -> Dict[str, Any]:
+    from src.firm.studio.sales import revenue
+    rev = revenue(event_store, datetime.utcnow() - timedelta(days=days))
+    return {"sales": rev["sales"], "net_usd": rev["net_usd"], "refunds_usd": rev["refunds_usd"],
+            "by_product": sorted(({"key": v.get("name") or k, "n": int(v["sales"]), "pnl": round(v["net_usd"], 2)}
+                                  for k, v in rev["by_product"].items()), key=lambda g: -g["pnl"])}
+
+
 def findings(r: Dict[str, Any]) -> List[str]:
     """Deterministische Kurzbefunde - nur fuer Gruppen mit genug Trades."""
     out: List[str] = []
@@ -98,6 +107,11 @@ def findings(r: Dict[str, Any]) -> List[str]:
     for g in r["shadow"]["research_candidates"][:3]:
         out.append(f"Schattenbuch: {g['epic']} {g['strategy']} {g['resolution']} {g['expectancy_r']:+.2f} R nach Spread "
                    f"ueber {g['n']} Signale - Forschungslauf wird ausgeloest (kein Handel ohne Freigabe)")
+    st = r.get("studio") or {}
+    if st.get("sales"):
+        top = st["by_product"][0] if st["by_product"] else None
+        out.append(f"Studio: {st['sales']} Verkaeufe, netto {st['net_usd']:+.2f} USD"
+                   + (f"; bestes Produkt {top['key']} ({top['pnl']:+.2f} USD)" if top else ""))
     if not out:
         out.append(f"Noch zu wenige abgeschlossene Trades je Gruppe (mind. {MIN_N}) fuer belastbare Befunde.")
     return out
@@ -118,6 +132,9 @@ def to_markdown(r: Dict[str, Any]) -> str:
     lines += [f"- {f}" for f in r["findings"]]
     lines += ["", "### Capital.com nach Strategie"] + table(r["capital"]["by_strategy"], "")
     lines += ["", "### Capital.com nach Markt"] + table(r["capital"]["by_market"], "")
+    st = r.get("studio") or {}
+    lines += ["", f"### Studio (digitale Produkte): {st.get('sales', 0)} Verkaeufe, netto {st.get('net_usd', 0):+.2f} USD"]
+    lines += [f"- {g['key']}: {g['n']} Verkaeufe, {g['pnl']:+.2f} USD" for g in st.get("by_product", [])[:10]] or ["- noch keine Verkaeufe"]
     lines += ["", "### Schattenbuch (nicht gehandelt, Spread abgezogen)"]
     best = r["shadow"]["best"]
     lines += [f"- {g['epic']} {g['strategy']} {g['resolution']}: {g['n']} Signale, {g['expectancy_r']:+.2f} R, "
