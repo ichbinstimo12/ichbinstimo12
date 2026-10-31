@@ -24,6 +24,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from src.firm.research import lab
+from src.firm.money.entry_quality import backtest_entry_ok
 
 logger = logging.getLogger("MarketScanner")
 
@@ -207,6 +208,8 @@ class MarketScanner:
         d = 1 if side == "BUY" else -1
         entry = hit["price"]
         spread = (quote["ask"] - quote["bid"]) if quote and quote.get("ask") and quote.get("bid") else 0.0
+        if not backtest_entry_ok(sd, tp, spread):
+            return          # dieselbe Kostenregel wie Livehandel und Backtest: so ein Trade wuerde nie gesendet
         self.shadows.append({"epic": hit["epic"], "strategy": hit["strategy"], "side": side, "entry": entry,
                              "stop": entry - d * sd, "target": entry + d * (tp if tp else 2 * sd),
                              "bar_ts": hit["bar_ts"], "cost_r": round(spread / sd, 3), "max_bars": SHADOW_MAX_BARS,

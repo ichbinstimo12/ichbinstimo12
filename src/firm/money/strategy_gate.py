@@ -63,12 +63,12 @@ class StrategyGate:
             return {"ok": False, "strategy": None, "params": None, "risk_factor": 0.0, "reason": reason,
                     "resolution": None, "lane": None}
 
-        def yes(strategy, params, factor, reason, lane, res):
+        def yes(strategy, params, factor, reason, lane, res, oos=None):
             if trading_style() == "daytrade" and (res or resolution or "") not in INTRADAY:
                 return no(f"Urteil ist Swing ({res or resolution}); Daytrading-Modus (FIRM_STYLE=daytrade) - "
                           "neue Forschung auf Intraday-Kerzen laeuft")
             return {"ok": True, "strategy": strategy, "params": params, "risk_factor": factor, "reason": reason,
-                    "resolution": res or default_res, "lane": lane}
+                    "resolution": res or default_res, "lane": lane, "oos_expectancy_r": oos}
 
         live = str(mode).upper().startswith("LIVE")
         demo_only_ok = is_demo and not live
@@ -88,13 +88,14 @@ class StrategyGate:
         if v.get("size_feasible") is False:
             verdict = "SIZE_BLOCKED"
         if verdict == "PASS":
-            return yes(v["strategy"], v.get("params"), 1.0, "PASS (out-of-sample bestanden)", "PASS", v.get("resolution"))
+            return yes(v["strategy"], v.get("params"), 1.0, "PASS (out-of-sample bestanden)", "PASS", v.get("resolution"),
+                       v.get("oos_expectancy_r"))
         if verdict == "FORWARD_TEST" and demo_only_ok:
             return yes(v["strategy"], v.get("params"), 0.5, "FORWARD_TEST (nur Demo, halbes Risiko)", "FORWARD_TEST",
-                       v.get("resolution"))
+                       v.get("resolution"), v.get("oos_expectancy_r"))
         ex = v.get("explore")
         if ex and demo_only_ok and _explore_enabled():
             return yes(ex["strategy"], ex.get("params"), EXPLORE_RISK,
                        f"EXPLORE (nur Demo, 1/4 Risiko, OOS E={ex.get('oos_expectancy_r', 0):.2f} R nicht signifikant)",
-                       "EXPLORE", ex.get("resolution"))
+                       "EXPLORE", ex.get("resolution"), ex.get("oos_expectancy_r"))
         return no(f"Urteil {verdict}: " + "; ".join(v.get("reasons", [])[:2]))

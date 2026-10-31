@@ -285,6 +285,12 @@ Hat das Schattenbuch für einen Markt genug Belege (≥ 30 Signale, ≥ +0.10 R 
 startet die Forschung für diesen Markt automatisch (höchstens 1×/Tag). Wo die Firma Geld verdient oder verliert:
 Dashboard-Panel „GELD-BILANZ", `GET /api/performance?days=30`, Abschnitt im Tagesbericht.
 
+### Prüfung vor dem Senden
+Jede Order wird direkt vor dem Senden mit dem Live-Kurs geprüft: Spread höchstens 0.20 R, Kursdrift gegen das
+Signal höchstens 0.25 R (gleiche Kostenregel in Backtest und Schattenbuch). Verworfene Signale: SIGNAL_BLOCKED mit
+`stage = entry-quality`. Nur verschärfbar: `FIRM_MAX_COST_R`, `FIRM_MAX_DRIFT_R`. Strategien mit knappem Vorteil
+(out-of-sample < 0.15 R) handeln mit halbem Risiko.
+
 ### Dauerlauf-Schalter (.env)
 | Variable | Standard | Wirkung |
 |---|---|---|

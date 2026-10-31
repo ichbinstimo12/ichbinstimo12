@@ -27,6 +27,7 @@ from src.firm.money.execution_gateway import ExecutionGateway, TradeProposal
 from src.firm.money.risk_gate import RiskGate
 from src.firm.money.signal_v2 import SignalEngineV2
 from src.firm.money.sizing import size_position_v2
+from src.firm.money.entry_quality import edge_factor, entry_check
 from src.firm.money.strategy_gate import StrategyGate
 from src.firm.money.journal import DeskRules, StrategyHealth
 from src.firm.research.lab import RES_SECONDS
@@ -749,6 +750,11 @@ class TradingDesk:
             if news_block:
                 summary["skipped"].append({"epic": epic, "reason": news_block})
                 continue
+            # EXPLORE traegt den Abschlag fuer knappe Vorteile schon (1/4 Risiko) - nicht doppelt bestrafen
+            e_factor = edge_factor(dec.get("oos_expectancy_r")) if dec.get("lane") != "EXPLORE" else 1.0
+            if e_factor < 1:
+                risk_factor *= e_factor
+                why = f"{why}; knapper Vorteil (OOS {dec.get('oos_expectancy_r'):+.2f} R) -> Risiko x{e_factor}"
             if self.mode.upper() == "LIVE_MICRO":
                 risk_factor *= 0.5          # erste Live-Stufe: halbes Risiko pro Trade (Skalierungs-Leiter)
                 why = f"{why}; LIVE_MICRO x0.5"
@@ -774,6 +780,16 @@ class TradingDesk:
             signal = engine.evaluate(epic, candles, market.get("bid"), market.get("ask"))
             if signal is None:
                 summary["skipped"].append({"epic": epic, "reason": "no signal"})
+                continue
+            # Pruefung vor dem Senden mit dem echten Live-Kurs: Spread und Kursdrift in R (wie im Backtest).
+            quality = entry_check(signal.side, signal.entry, signal.stop_loss, signal.take_profit,
+                                  market.get("bid"), market.get("ask"))
+            if quality:
+                summary["skipped"].append({"epic": epic, "reason": quality})
+                self.event_store.append("TRADING_DESK", "SIGNAL_BLOCKED", {
+                    "epic": epic, "side": signal.side, "strategy": strat, "reason": quality, "stage": "entry-quality",
+                    "entry": signal.entry, "stop_loss": signal.stop_loss, "take_profit": signal.take_profit,
+                    "bid": market.get("bid"), "ask": market.get("ask")})
                 continue
             allowed, why_rules = self.rules.can_enter(epic, signal.side)
             if not allowed:

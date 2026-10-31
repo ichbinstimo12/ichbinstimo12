@@ -77,6 +77,13 @@ def build_facts(event_store, mode: str, gate=None, overlay=None, desk=None) -> D
         facts["performance_30d"] = performance.cached_findings(event_store)
     except Exception:
         facts["performance_30d"] = "UNKNOWN"
+    blocks = [_payload(e) for e in event_store.get_events(types=["SIGNAL_BLOCKED"], last=50)
+              if _payload(e).get("stage") == "entry-quality"]
+    if blocks:
+        facts["entry_quality_blocked_recent"] = {
+            "count_last_50_blocks": len(blocks),
+            "examples": [{k: b.get(k) for k in ("epic", "strategy", "reason")} for b in blocks[-3:]],
+            "note": "Signale, die vor dem Senden wegen Spread oder Kursdrift verworfen wurden"}
     results = event_store.get_events(types=["TRADE_RESULT"], last=20)
     rows = [_payload(e) | {"ts": e.get("ts")} for e in results]
     facts["recent_trade_results"] = [

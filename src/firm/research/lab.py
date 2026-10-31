@@ -16,6 +16,7 @@ import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from statistics import NormalDist
+from src.firm.money.entry_quality import backtest_entry_ok
 
 RES_SECONDS = {"MINUTE": 60, "MINUTE_5": 300, "MINUTE_15": 900, "MINUTE_30": 1800,
                "HOUR": 3600, "HOUR_4": 14400, "DAY": 86400, "WEEK": 604800}
@@ -639,7 +640,7 @@ def grid_points(name):
 
 # ------------------------------------------------------------------- Backtest
 def backtest(candles, strat: Strategy, cost_mult=1.0, slip_atr=0.03, spread_default_pct=0.0004,
-             overnight_r_per_bar=0.0, first=None, overnight_pct_day=0.0, bar_seconds=3600):
+             overnight_r_per_bar=0.0, first=None, overnight_pct_day=0.0, bar_seconds=3600, entry_filter=True):
     """Alle Kosten stecken in den Fill-Preisen. `first`: ab diesem Index duerfen Einstiege erfolgen (Warm-up davor).
     Lernende Strategien werden vorher nur auf Kerzen < first trainiert (ohne `first`: Training auf den ersten 60 %,
     gehandelt wird erst danach). `overnight_pct_day`: Finanzierungskosten je gehaltenem Tag in Anteil des Preises."""
@@ -692,7 +693,7 @@ def backtest(candles, strat: Strategy, cost_mult=1.0, slip_atr=0.03, spread_defa
             sig = strat.entry(ind, i)
             if sig:
                 side, sd, tp = sig
-                if sd and sd > 0:
+                if sd and sd > 0 and (not entry_filter or backtest_entry_ok(sd, tp, 2 * half_spread(i + 1))):
                     d = 1 if side == "BUY" else -1
                     entry = nxt["o"] + d * (half_spread(i + 1) + slip_atr * atr[i] * cost_mult)
                     pos = {"side": side, "entry": entry, "stop": entry - d * sd, "dist": sd, "atr": atr[i], "i": i + 1,

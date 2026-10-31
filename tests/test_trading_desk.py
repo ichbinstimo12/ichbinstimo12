@@ -574,3 +574,31 @@ def test_existing_state_without_account_key_keeps_a_plausible_peak(tmp_path):
     st2 = DeskState(str(path)); st2.data.pop("account_key")
     assert st2.bind_account("LIVE:L1:CHF", equity=200.0) == "unbound"   # 80 % below: clearly another account
     assert st2.peak_balance(200.0) == 200.0
+
+
+@pytest.mark.asyncio
+async def test_thin_edge_pass_trades_half_size_and_runaway_price_is_not_chased(desk_env, monkeypatch):
+    import json as _json
+    broker = FakeBroker(hourly_candles(breakout_closes()))
+    desk = build_gated_desk(desk_env, broker)
+    await desk.run_cycle()
+    full = broker.orders[0]["size"]
+    v = _json.loads(desk.gate.path.read_text())
+    for verdict in v["verdicts"].values():
+        verdict["oos_expectancy_r"] = 0.05
+    desk.gate.path.write_text(_json.dumps(v))
+    broker2 = FakeBroker(hourly_candles(breakout_closes()))
+    desk2 = build_gated_desk(desk_env, broker2)
+    desk2.state.data = {}
+    desk2.gate.path.write_text(_json.dumps(v))
+    await desk2.run_cycle()
+    assert broker2.orders[0]["size"] == pytest.approx(full * 0.5, rel=0.02)
+
+    monkeypatch.setenv("FIRM_MAX_DRIFT_R", "-5")     # jede Drift zu viel -> nichts wird gesendet
+    broker3 = FakeBroker(hourly_candles(breakout_closes()))
+    desk3 = build_gated_desk(desk_env, broker3)
+    desk3.state.data = {}
+    await desk3.run_cycle()
+    assert broker3.orders == []
+    blocked = desk_env["store"].get_events(types=["SIGNAL_BLOCKED"])
+    assert blocked and _json.loads(blocked[-1]["payload_json"])["stage"] == "entry-quality"
