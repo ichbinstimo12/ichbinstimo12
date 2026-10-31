@@ -19,6 +19,8 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from src.firm.paths import data_dir
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -157,7 +159,7 @@ class Notifier:
         self.client = client or httpx.AsyncClient(timeout=15)
         self.now, self.max_per_hour, self.dedupe_s = now_fn, max_per_hour, dedupe_s
         self._sent: List[float] = []
-        cf = e.get("NOTIFY_CURSOR_FILE", "data/notify_cursor.txt") if env is None else e.get("NOTIFY_CURSOR_FILE")
+        cf = e.get("NOTIFY_CURSOR_FILE", str(data_dir() / "notify_cursor.txt")) if env is None else e.get("NOTIFY_CURSOR_FILE")
         self.cursor_file: Optional[Path] = Path(cf) if cf else None
         self._last_key: Dict[str, float] = {}
 

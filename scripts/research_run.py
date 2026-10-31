@@ -14,6 +14,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.firm.paths import apply_home, data_dir  # noqa: E402
+
+apply_home()      # dieselben Daten wie die laufende Firma (Datenordner ausserhalb des Programmordners)
 from src.firm.research import history, pipeline  # noqa: E402
 
 
@@ -24,7 +27,7 @@ async def load_online(epics, resolution, days):
     client = CapitalComClient()
     await client.authenticate()
     try:
-        return await pipeline.fetch_history(client, epics, resolution, days, ROOT / "data" / "history")
+        return await pipeline.fetch_history(client, epics, resolution, days, data_dir() / "history")
     finally:
         await client.close()
 
@@ -41,9 +44,9 @@ def main():
         data = {p.stem.split("_")[0]: history.load_csv(p) for p in Path(a.offline).glob(f"*_{a.resolution}.csv")}
     else:
         data = asyncio.run(load_online(epics, a.resolution, a.days))
-    verdicts_path = ROOT / "data" / "strategy_verdicts.json"
+    verdicts_path = data_dir() / "strategy_verdicts.json"
     verdicts, lines, trials = pipeline.run_research(data, a.resolution, pipeline.previous_trials(verdicts_path))
-    pipeline.write_outputs(verdicts, lines, trials, a.resolution, ROOT / "data")
+    pipeline.write_outputs(verdicts, lines, trials, a.resolution, data_dir())
     print("\n".join(lines))
 
 

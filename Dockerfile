@@ -24,7 +24,11 @@ COPY evals/ ./evals/
 COPY scripts/ ./scripts/
 RUN mkdir -p /app/data && chown -R firm:firm /app/data
 
-ENV FIRM_DB_PATH=/app/data/firm_events.db \
+ENV FIRM_HOME=/app/data \
+    FIRM_DATA_DIR=/app/data \
+    FIRM_STUDIO_DIR=/app/data/studio/products \
+    NOTIFY_CURSOR_FILE=/app/data/notify_cursor.txt \
+    FIRM_DB_PATH=/app/data/firm_events.db \
     FIRM_STATE_PATH=/app/data/firm_state.json \
     FIRM_HALT_FILE=/app/data/firm.halt \
     FIRM_LIVE_TOKEN_FILE=/app/data/live_token.json \

@@ -456,7 +456,8 @@ def create_app(
         p = studio_catalog().get(product_id)
         if p is None or p["status"] not in ("AWAITING_APPROVAL", "APPROVED", "PUBLISHED"):
             raise HTTPException(status_code=404, detail="kein Paket fuer dieses Produkt")
-        root = Path(os.getenv("FIRM_STUDIO_DIR", "data/studio/products"))
+        from src.firm.paths import data_dir
+        root = Path(os.getenv("FIRM_STUDIO_DIR") or data_dir() / "studio" / "products")
         folder = root / p["id"]
         if not folder.exists():
             folder = package.build(p, root)

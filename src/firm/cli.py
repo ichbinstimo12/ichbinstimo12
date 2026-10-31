@@ -343,6 +343,48 @@ def _studio_command(args) -> int:
     return 0
 
 
+def memory_summary(db_path: str) -> dict:
+    """Was die Firma weiss: Lektionen je Agent, Playbooks, Ereignisse, Forschungsurteile."""
+    import sqlite3
+    from src.firm.paths import data_dir
+    out = {"db": str(Path(db_path).resolve()), "lessons": 0, "lessons_by_agent": {}, "playbooks": 0, "events": 0,
+           "research_verdicts": (data_dir() / "strategy_verdicts.json").exists()}
+    if not Path(db_path).exists():
+        return out
+    with sqlite3.connect(db_path) as c:
+        tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "lessons" in tables:
+            rows = c.execute("SELECT agent_id, COUNT(*) FROM lessons GROUP BY agent_id").fetchall()
+            out["lessons_by_agent"] = {a: n for a, n in rows}
+            out["lessons"] = sum(n for _, n in rows)
+        if "playbooks" in tables:
+            out["playbooks"] = c.execute("SELECT COUNT(*) FROM playbooks").fetchone()[0]
+        if "events" in tables:
+            out["events"] = c.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    return out
+
+
+def _memory_command(args) -> int:
+    from src.firm.paths import default_home, import_memory
+    home = default_home() or Path(".")
+    if args.action == "import":
+        if not args.folder:
+            print("Ordner angeben, z. B.: firm memory import C:\\Users\\du\\Downloads\\trading-firm-alt")
+            return 1
+        print("Hinweis: Die Firma darf waehrenddessen nicht laufen (sonst zuerst ihr Fenster schliessen).")
+        try:
+            rep_ = import_memory(Path(args.folder), home)
+        except FileNotFoundError as e:
+            print(f"Nicht moeglich: {e}")
+            return 1
+        print(f"Gedaechtnis importiert aus {rep_['from']} -> {rep_['to']}: {rep_['lessons']} Lektionen."
+              + (f" Vorheriger Stand gesichert: {rep_['backup']}" if rep_["backup"] else ""))
+        return 0
+    print(json.dumps({"datenordner": str(home), **memory_summary(os.getenv("FIRM_DB_PATH", "firm_events.db"))},
+                     indent=1, ensure_ascii=False))
+    return 0
+
+
 def _treasury_command(args) -> int:
     from src.firm.bus.event_store import EventStore
     from src.firm.money.strategy_gate import StrategyGate
@@ -411,6 +453,9 @@ async def main():
     studio_parser.add_argument("action", choices=["list", "approve", "reject", "published", "retire"], nargs="?", default="list")
     studio_parser.add_argument("product_id", nargs="?")
     studio_parser.add_argument("ref", nargs="?", help="bei published: Produkt-ID/Link im Shop")
+    memory_parser = subparsers.add_parser("memory", help="Gedaechtnis: status | import <alter Programmordner>")
+    memory_parser.add_argument("action", choices=["status", "import"], nargs="?", default="status")
+    memory_parser.add_argument("folder", nargs="?", help="bei import: der alte Ordner mit firm_events.db")
     treasury_parser = subparsers.add_parser("treasury", help="Schatzkammer: status | transferred USD")
     treasury_parser.add_argument("action", choices=["status", "transferred"], nargs="?", default="status")
     treasury_parser.add_argument("usd", nargs="?", type=float)
@@ -439,6 +484,7 @@ async def main():
     install_loop_noise_filter(asyncio.get_running_loop())
 
     if args.command == "run":
+        logger.info(f"Datenordner (Gedaechtnis, Archiv, Berichte): {Path(os.getenv('FIRM_DB_PATH', 'firm_events.db')).resolve().parent}")
         # A stale halt flag must stop the run before anything is initialised.
         if HALT_FILE.exists() and not args.wait_on_halt:
             logger.error(
@@ -564,6 +610,8 @@ async def main():
         return _studio_command(args)
     elif args.command == "treasury":
         return _treasury_command(args)
+    elif args.command == "memory":
+        return _memory_command(args)
     elif args.command == "notify-test":
         return await _notify_test()
 

@@ -28,8 +28,10 @@ def _explore_enabled() -> bool:
 
 
 class StrategyGate:
-    def __init__(self, path="data/strategy_verdicts.json", max_age_days=30):
-        self.path, self.max_age = Path(path), max_age_days * 86400
+    def __init__(self, path=None, max_age_days=30):
+        from src.firm.paths import data_dir
+        self.path = Path(path) if path else data_dir() / "strategy_verdicts.json"
+        self.max_age = max_age_days * 86400
 
     def _load(self):
         try:

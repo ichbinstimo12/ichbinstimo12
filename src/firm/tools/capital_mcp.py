@@ -71,9 +71,10 @@ def os_ca_bundle(workdir: Path) -> Optional[str]:
 class CapitalMCPTools:
     """Duenner, sicherer MCP-Client. `available` ist False, wenn Paket/Server/Zugangsdaten fehlen."""
 
-    def __init__(self, command: Optional[str] = None, workdir: str | Path = "data/mcp", call_timeout: float = 30.0):
+    def __init__(self, command: Optional[str] = None, workdir: str | Path | None = None, call_timeout: float = 30.0):
         self.command = command or os.getenv("FIRM_MCP_COMMAND", "capitalcom-mcp")
-        self.workdir = Path(workdir)
+        from src.firm.paths import data_dir
+        self.workdir = Path(workdir) if workdir else data_dir() / "mcp"
         self.call_timeout = call_timeout
         self.available = False
         self.reason = "nicht gestartet"

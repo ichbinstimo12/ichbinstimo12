@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import history, lab
+from src.firm.paths import data_dir
 
 EXPLORE_MIN_TRADES = 30
 EXPLORE_MIN_EXPECTANCY_R = 0.0
@@ -44,7 +45,7 @@ def previous_trials(verdicts_path: str | Path) -> int:
 
 
 async def fetch_history(client, epics: List[str], resolution: str, days: int,
-                        cache_dir: str | Path = "data/history", log=print) -> Dict[str, list]:
+                        cache_dir: str | Path | None = None, log=print) -> Dict[str, list]:
     """Laedt die Historie seitenweise vom Broker und legt sie als CSV ab."""
     async def page(epic, res, a, b):
         return await client.get_prices_range(epic, res, a, b)
@@ -54,7 +55,7 @@ async def fetch_history(client, epics: List[str], resolution: str, days: int,
         log(f"Lade {e} ({days} Tage, {resolution}) ...")
         candles = await history.afetch_range(page, e, resolution, days)
         if candles:
-            history.save_csv(Path(cache_dir) / f"{e}_{resolution}.csv", candles)
+            history.save_csv(Path(cache_dir or data_dir() / "history") / f"{e}_{resolution}.csv", candles)
         out[e] = candles
     return out
 
@@ -240,8 +241,8 @@ def run_research_multi(data_by_res: Dict[str, Dict[str, list]], trials_in: int =
 
 
 def write_outputs(verdicts: Dict[str, Any], lines: List[str], trials: int, resolution,
-                  out_dir: str | Path = "data") -> Path:
-    out = Path(out_dir)
+                  out_dir: str | Path | None = None) -> Path:
+    out = Path(out_dir) if out_dir else data_dir()
     out.mkdir(parents=True, exist_ok=True)
     path = out / "strategy_verdicts.json"
     tmp = path.with_suffix(".tmp")

@@ -1,5 +1,13 @@
 # Runbook: Autonomous Trading Firm
 
+## 0. Wo das Gedächtnis liegt
+
+Lektionen, Playbooks, Ereignisse, Archiv, Berichte und Forschungsurteile liegen im **Datenordner**, nicht im
+Programmordner: Windows `%USERPROFILE%\TradingFirm-Daten`, Linux `~/.trading-firm`, Docker `./data`. Eine neue
+Version darf also in einen neuen Ordner – das Wissen bleibt. `firm memory status` zeigt Ort und Inhalt;
+`firm memory import <alter Programmordner>` holt Wissen aus einer früheren Kopie (Firma vorher beenden).
+Agenten lernen zusätzlich automatisch aus gemessenen Ergebnissen (alle 30 min, ohne Tokens).
+
 ## 1. Start
 
 Voraussetzungen:

@@ -3,14 +3,19 @@ Forschungsurteile und Desk-Zustand. Aelteste Sicherungen werden nach `keep` Tage
 from __future__ import annotations
 
 import shutil
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
 
-def backup_now(db_path: str, out_dir: str | Path = "data/backups", keep: int = 14,
-               extra_files: tuple = ("data/strategy_verdicts.json", "firm_state.json")) -> Path:
+def backup_now(db_path: str, out_dir: str | Path | None = None, keep: int = 14,
+               extra_files: tuple | None = None) -> Path:
+    from src.firm.paths import data_dir
+    out_dir = out_dir or data_dir() / "backups"
+    extra_files = extra_files if extra_files is not None else (
+        str(data_dir() / "strategy_verdicts.json"), os.getenv("FIRM_STATE_PATH", "firm_state.json"))
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     target = Path(out_dir) / stamp
     target.mkdir(parents=True, exist_ok=True)

@@ -25,6 +25,7 @@ from src.firm.money.strategy_gate import StrategyGate
 from src.firm.research import pipeline
 from src.firm.tools.capital_mcp import CapitalMCPTools
 from src.firm.llm.factory import get_llm_provider
+from src.firm.paths import data_dir
 
 logging.basicConfig(level=logging.INFO, format='%(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("FirmOrchestrator")
@@ -294,9 +295,30 @@ class FirmOrchestrator:
             self._supervised("scheduler_loop", self.scheduler_loop),
             self._supervised("agent_loop", self.agent_loop),
             self._supervised("hiring_loop", self.hiring_loop),
+            self._supervised("learning_loop", self.learning_loop),
         ]
+        mem = self.agent_runtime.memory
+        logger.info(f"Gedaechtnis: {mem.count()} Lektionen in {Path(self.db_path).resolve()} "
+                    f"(bleibt bei Neustart und Update erhalten; Ort: FIRM_HOME / firm memory status)")
         if os.getenv("FIRM_STUDIO", "1").strip().lower() not in ("0", "false", "no", "off"):
             self._background_tasks.append(self._supervised("studio_loop", self.studio_loop))
+
+    async def learning_loop(self):
+        """Lessons from measured results (live trades, shadow book, blocked signals, slippage) - no tokens.
+        Confirmed while the numbers hold, replaced when they change (src/firm/agents/outcome_lessons.py)."""
+        from src.firm.agents.outcome_lessons import refresh
+        interval = float(os.getenv("FIRM_LEARN_SECONDS", "1800"))
+        while self.is_running:
+            try:
+                stats = await asyncio.to_thread(refresh, self.event_store, self.agent_runtime.memory)
+                if stats["added"] or stats["replaced"]:
+                    logger.info(f"Learned from results: {stats}")
+                    self.event_store.append("BRAIN", "OUTCOME_LESSONS", stats)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"Learning from results failed: {e}")
+            await asyncio.sleep(interval)
 
     def _studio_llm(self):
         """The studio may use a different (better) model than the agents: STUDIO_LLM_PROVIDER / STUDIO_MODEL."""
@@ -314,7 +336,7 @@ class FirmOrchestrator:
         from src.firm.studio.workshop import Workshop
         interval = float(os.getenv("FIRM_STUDIO_SECONDS", "300"))
         workshop = Workshop(self._studio_llm(), Catalog(self.event_store.db_path, self.event_store), self.event_store,
-                            load_config(), load_limits(), Path(os.getenv("FIRM_STUDIO_DIR", "data/studio/products")),
+                            load_config(), load_limits(), Path(os.getenv("FIRM_STUDIO_DIR") or data_dir() / "studio" / "products"),
                             firm_token_budget=int(self.limits.get("operational", {}).get("max_token_budget_daily", 0)) or None)
         logger.info(f"Studio started (one step every {interval:.0f}s; limits {workshop.limits}).")
         failures = 0
@@ -589,9 +611,9 @@ class FirmOrchestrator:
                     await self.run_promotion_check()
                     try:
                         from src.firm.ops.backup import backup_now
-                        target = await asyncio.to_thread(backup_now, self.db_path, os.getenv("FIRM_BACKUP_DIR", "data/backups"),
+                        target = await asyncio.to_thread(backup_now, self.db_path, os.getenv("FIRM_BACKUP_DIR") or data_dir() / "backups",
                                                          int(os.getenv("FIRM_BACKUP_KEEP", "14")),
-                                                         ("data/strategy_verdicts.json",
+                                                         (str(data_dir() / "strategy_verdicts.json"),
                                                           os.getenv("FIRM_STATE_PATH", "firm_state.json")))
                         logger.info(f"Backup written: {target}")
                     except Exception as e:

@@ -28,4 +28,9 @@ def main(db):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "firm_events.db")
+    import os
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from src.firm.paths import apply_home
+    apply_home()
+    main(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("FIRM_DB_PATH", "firm_events.db"))

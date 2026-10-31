@@ -14,8 +14,9 @@ class DataLoader:
     Handles loading and cleaning of historical data.
     Enforces strict timestamp discipline and look-ahead prevention.
     """
-    def __init__(self, data_dir: str = "data/historical"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str | None = None):
+        from src.firm.paths import data_dir as _home_data
+        self.data_dir = Path(data_dir) if data_dir else _home_data() / "historical"
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
     def load_csv(self, epic: str) -> pd.DataFrame:

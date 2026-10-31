@@ -3,8 +3,15 @@ import json
 import sqlite3
 import sys
 import time
+import os
+from pathlib import Path
 
-DB = "firm_events.db"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.firm.paths import apply_home  # noqa: E402
+
+apply_home()      # Datenbank im Datenordner der Firma (ausserhalb des Programmordners)
+
+DB = os.environ.get("FIRM_DB_PATH", "firm_events.db")
 DEADLINE = time.time() + 480
 
 

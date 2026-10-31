@@ -36,6 +36,10 @@ from src.firm.envload import use_os_trust_store  # noqa: E402
 
 use_os_trust_store()          # before any HTTPS client is created
 
+from src.firm.paths import apply_home  # noqa: E402
+
+apply_home()                  # memory outside the code folder: before modules read their path defaults
+
 from src.firm.cli import main  # noqa: E402
 
 if __name__ == "__main__":
